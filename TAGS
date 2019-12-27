@@ -1,35 +1,103 @@
 
-md.3.cpp,562
-#undef SEEK_SET11,187
-#undef SEEK_CUR12,203
-#undef SEEK_END13,219
-const double ARmass 15,236
-const double ARsigma 16,279
-const double AReps 17,327
-const double CellDim 18,373
-int NPartPerCell 19,421
-class Particle{Particle23,526
-  Particle(Particle::Particle39,1041
-  double update(Particle::update44,1169
-class Cell 64,1540
-  Cell(Cell::Cell74,1825
-  void Communicate(Cell::Communicate114,3181
-  void PostWaits(Cell::PostWaits254,7636
-double interact(265,7884
-double interact(293,8526
-int ComputeAtomsPerCell(297,8630
-int main(324,9094
+pmd.cpp,774
+const double ARmass 7,296
+const double ARsigma 8,339
+const double AReps 9,387
+const double CellDim 10,433
+int NPartPerCell 11,481
+class Particle{Particle16,587
+  Particle(Particle::Particle32,1102
+  double update(Particle::update37,1230
+class Cell 57,1601
+  Cell(Cell::Cell67,1886
+  void Communicate(Cell::Communicate107,3242
+  void PostWaits(Cell::PostWaits247,7697
+double interact(258,7945
+double interact(286,8587
+int ComputeAtomsPerCell(290,8691
+int main(317,9223
+void init_params(347,10109
+void set_topology(387,11316
+void init_conf(422,12469
+void single_step(475,14196
+void half_kick(491,14847
+void atom_copy(501,15241
+void compute_accel(605,18823
+void eval_props(717,22435
+void atom_move(744,23296
+int bbd(888,28119
+int bmv(897,28340
 
-pmd.cpp,292
-int main(9,409
-void init_params(35,1159
-void set_topology(81,2558
-void init_conf(116,3711
-void single_step(169,5438
-void half_kick(185,6089
-void atom_copy(195,6483
-void compute_accel(299,10065
-void eval_props(411,13677
-void atom_move(438,14538
-int bbd(582,19361
-int bmv(591,19582
+pmd.hpp,1356
+#define NMAX 20,849
+#define NEMAX 21,869
+#define NDBUF 22,890
+#define NBMAX 23,911
+#define NCLMAX 24,932
+#define RCUT 25,954
+#define MOVED_OUT 26,971
+#define EMPTY 27,997
+#define D2P31M 29,1062
+#define DMUL 30,1090
+double al[al76,3069
+int n,77,3083
+int n,nb,77,3083
+int n,nb,nglob;77,3083
+double r[r78,3099
+double r[NEMAX][3],rv[rv78,3099
+double r[NEMAX][3],rv[NEMAX][3],ra[ra78,3099
+double dbuf[dbuf79,3144
+double dbuf[NDBUF],dbufr[dbufr79,3144
+int vproc[vproc80,3177
+int sid,81,3212
+int sid,vid[vid81,3212
+int sid,vid[3],nn[nn81,3212
+int sid,vid[3],nn[6],myparity[myparity81,3212
+double sv[sv82,3246
+int lsb[lsb83,3263
+MPI_Status status;84,3282
+double cpu,85,3301
+double cpu,comt;85,3301
+int head[head86,3318
+int head[NCLMAX],lscl[lscl86,3318
+int head[NCLMAX],lscl[NEMAX],lc[lc86,3318
+double rc[rc87,3354
+double kinEnergy,88,3368
+double kinEnergy,potEnergy,88,3368
+double kinEnergy,potEnergy,totEnergy,88,3368
+double kinEnergy,potEnergy,totEnergy,temperature;88,3368
+int stepCount;89,3418
+double DeltaTH;90,3433
+double Uc,91,3477
+double Uc, Duc;91,3477
+int InitUcell[InitUcell97,3701
+double Density;98,3762
+double InitTemp;99,3830
+double DeltaT;100,3895
+int StepLimit;101,3959
+int StepAvg;102,4022
+double SignR(106,4163
+double Dmod(107,4234
+double RandR(112,4318
+void RandVec3(116,4409
+
+md.3.cpp,562
+#undef SEEK_SET12,227
+#undef SEEK_CUR13,243
+#undef SEEK_END14,259
+const double ARmass 16,276
+const double ARsigma 17,319
+const double AReps 18,367
+const double CellDim 19,413
+int NPartPerCell 20,461
+class Particle{Particle24,566
+  Particle(Particle::Particle40,1081
+  double update(Particle::update45,1209
+class Cell 65,1580
+  Cell(Cell::Cell75,1865
+  void Communicate(Cell::Communicate115,3221
+  void PostWaits(Cell::PostWaits255,7676
+double interact(266,7924
+double interact(294,8566
+int ComputeAtomsPerCell(298,8670
+int main(325,9134
