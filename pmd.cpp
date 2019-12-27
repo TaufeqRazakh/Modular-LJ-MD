@@ -8,6 +8,7 @@ systems using the Message Passing Interface (MPI) standard.
 #include <fstream>      // std::fstream
 #include <vector>
 #include <array>
+#include <random>
 #include "pmd.hpp"
 
 const double ARmass = 39.94800000; //A.U.s
@@ -21,6 +22,8 @@ using namespace std;
 // Class for keeping track of the properties for an atom
 class Atom{
 public:
+  int type;             // identifier for atom type
+  
   double x;		// position in x axis
   double y;		// position in y axis
   double z;		// position in y axis
@@ -34,26 +37,8 @@ public:
   double vz;            // velocity on y axis
   // Default constructor
   Atom() 
-    : x(0.0),y(0.0),z(0.0),
+    : type(0),x(0.0),y(0.0),z(0.0),
       ax(0.0),ay(0.0),az(0.0),vx(0.0),vy(0.0),vz(0.0){
-  }
-  
-  double update(){
-    // We are using a 1.0 fs timestep, this is converted
-    double DT = 0.000911633;
-    ax = fx/ARmass;
-    ay = fy/ARmass;
-    az = fz/ARmass;
-    vx += ax*0.5*DT;
-    vy += ay*0.5*DT;
-    vz += ay*0.5*DT;
-    x += DT*vx;
-    y += DT*vy;
-    z += DT*vz;
-    fx = 0.0;
-    fy = 0.0;
-    fz = 0.0;
-    return 0.5*ARmass*(vx*vx+vy*vy+vz*vz);
   }
 };
  
@@ -68,19 +53,27 @@ public:
   array<int, 3> vid;
   array<int, 3> myparity;
   array<int, 6> nn; 
-  array<double, 3> vSum, gvSum, vMag;
+  array<double, 3> vSum, gvSum;
   vector<Atom> atoms;
 
   /* Create cell with by taking the parameters for InitUcell and InitTemp 
-     we calculate the number of atoms and random velocities */
-  Cell(array<int, 3> InitUcell, double InitTemp) {
+     we calculate the number of atoms and give them random velocities */
+  Cell(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp) {
+    default_random_engine generator;
+    normal_distribution<double> distribution(1,1);
+  
+    // Prepare the Neighbot-node table
+    InitNeighborNode(vproc);
 
+    //  Initialize lattice positions and assign random velocities
     array<double, 3> c,gap;
     int j,a,nX,nY,nZ;
 
-      /* FCC atoms in the original unit cell */
+    /* FCC atoms in the original unit cell */
     vector<vector<double> > origAtom = {{0.0, 0.0, 0.0}, {0.0, 0.5, 0.5},
-                           {0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
+					{0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
+
+    
 
     /* Set up a face-centered cubic (fcc) lattice */
     for (a=0; a<3; a++) gap[a] = al[a]/InitUcell[a];
@@ -94,9 +87,9 @@ public:
 	  for (j=0; j<4; j++) {
 	    Atom atom;
 	    atom.x = c[0] + gap[0]*origAtom[j][0];
-	    atom.vx = sqrt(3*InitTemp)*drand48();
+	    atom.vx = sqrt(3*InitTemp)*distribution(generator);
 	    atom.y = c[1] + gap[1]*origAtom[j][1];
-	    atom.vy = sqrt(3*InitTemp)*drand48();
+	    atom.vy = sqrt(3*InitTemp)*distribution(generator);
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
 	    atom.vz = sqrt(3*InitTemp)*drand48();
 	    atoms.push_back(atom);
@@ -109,13 +102,18 @@ public:
       }
     }
 
-    /* Make the total momentum zero */
+    int n = atoms.size();
+    int nglob; // Total number of atoms summed over processors
+    MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+    MPI_Allreduce(vSum,gvSum,3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+
     for (a=0; a<3; a++) gvSum[a] /= nglob;
     for (j=0; j<n; j++)
       for(a=0; a<3; a++) rv[j][a] -= gvSum[a];
   }
 
-  void init_neighbor_node(array<int, 3> vproc) {
+  void InitNeighborNode(array<int, 3> vproc) {
     // Prepare neighbor-node ID table for a cell
     vid[0] = pid/(vproc[1]*vproc[2]);
     vid[1] = (pid/vproc[2])%vproc[1];
@@ -149,22 +147,113 @@ public:
     }
   }
 
-  void HalfKick() {
+  // Update the velocities after a time-step DeltaT
+  void HalfKick(double DeltaT) {
     for (std::vector<Atom>::iterator it = atoms.begin() ; it != atoms.end(); ++it) {
-      it->vx += DeltaTH*it->ax;
-      it->vy += DeltaTH*it->ay;
-      it->vz += DeltaTH*it->az;
+      it->vx += DeltaT*it->ax;
+      it->vy += DeltaT*it->ay;
+      it->vz += DeltaT*it->az;
     }
   }
-  
-  void Communicate(int*** CellMap, int Dimension){
 
-  }
-  void PostWaits(void){
-    MPI_Status statr[8];
-    MPI_Status stats[8];
-    MPI_Waitall(nreqs,reqs,stats);
-    MPI_Waitall(nreqr,reqr,statr);
+  // Exchange boundaty-atom co-ordinates among neighbor nodes
+  void AtomCopy() {
+    int kd,kdd,i,ku,inode,nsd,nrc,a;
+    int nbnew = 0; /* # of "received" boundary atoms */
+    double com1;
+
+    /* Main loop over x, y & z directions starts--------------------------*/
+
+    for (kd=0; kd<3; kd++) {
+
+      /* Make a boundary-atom list, LSB---------------------------------*/
+
+      /* Reset the # of to-be-copied atoms for lower&higher directions */
+      for (kdd=0; kdd<2; kdd++) lsb[2*kd+kdd][0] = 0;
+
+      /* Scan all the residents & copies to identify boundary atoms */ 
+      for (i=0; i<n+nbnew; i++) {
+	for (kdd=0; kdd<2; kdd++) {
+	  ku = 2*kd+kdd; /* Neighbor ID */
+	  /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
+	     according to bit-condition function, bbd */
+	  if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
+	}
+      }
+
+      /* Message passing------------------------------------------------*/
+
+      com1=MPI_Wtime(); /* To calculate the communication time */
+
+      /* Loop over the lower & higher directions */
+      for (kdd=0; kdd<2; kdd++) {
+
+	inode = nn[ku=2*kd+kdd]; /* Neighbor node ID */
+
+	/* Send & receive the # of boundary atoms-----------------------*/
+
+	nsd = lsb[ku][0]; /* # of atoms to be sent */
+
+	/* Even node: send & recv */
+	if (myparity[kd] == 0) {
+	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		   MPI_COMM_WORLD,&status);
+	}
+	/* Odd node: recv & send */
+	else if (myparity[kd] == 1) {
+	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		   MPI_COMM_WORLD,&status);
+	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	}
+	/* Single layer: Exchange information with myself */
+	else
+	  nrc = nsd;
+	/* Now nrc is the # of atoms to be received */
+
+	/* Send & receive information on boundary atoms-----------------*/
+
+	/* Message buffering */
+	for (i=1; i<=nsd; i++)
+	  for (a=0; a<3; a++) /* Shift the coordinate origin */
+	    dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a]; 
+
+	/* Even node: send & recv */
+	if (myparity[kd] == 0) {
+	  MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	  MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		   MPI_COMM_WORLD,&status);
+	}
+	/* Odd node: recv & send */
+	else if (myparity[kd] == 1) {
+	  MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		   MPI_COMM_WORLD,&status);
+	  MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	}
+	/* Single layer: Exchange information with myself */
+	else
+	  for (i=0; i<3*nrc; i++) dbufr[i] = dbuf[i];
+
+	/* Message storing */
+	for (i=0; i<nrc; i++)
+	  for (a=0; a<3; a++) r[n+nbnew+i][a] = dbufr[3*i+a]; 
+
+	/* Increment the # of received boundary atoms */
+	nbnew = nbnew+nrc;
+
+	/* Internode synchronization */
+	MPI_Barrier(MPI_COMM_WORLD);
+
+      } /* Endfor lower & higher directions, kdd */
+
+      comt += MPI_Wtime()-com1; /* Update communication time, COMT */
+
+    } /* Endfor x, y & z directions, kd */
+
+    /* Main loop over x, y & z directions ends--------------------------*/
+
+    /* Update the # of received boundary atoms */
+    nb = nbnew;         
   }
 };
     
@@ -282,120 +371,6 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
-}
-
-/*--------------------------------------------------------------------*/
-void half_kick() {
-/*----------------------------------------------------------------------
-Accelerates atomic velocities, rv, by half the time step.
-----------------------------------------------------------------------*/
-  int i,a;
-  for (i=0; i<n; i++)
-    for (a=0; a<3; a++) rv[i][a] = rv[i][a]+DeltaTH*ra[i][a];
-}
-
-/*--------------------------------------------------------------------*/
-void atom_copy() {
-/*----------------------------------------------------------------------
-Exchanges boundary-atom coordinates among neighbor nodes:  Makes 
-boundary-atom list, LSB, then sends & receives boundary atoms.
-----------------------------------------------------------------------*/
-  int kd,kdd,i,ku,inode,nsd,nrc,a;
-  int nbnew = 0; /* # of "received" boundary atoms */
-  double com1;
-
-/* Main loop over x, y & z directions starts--------------------------*/
-
-  for (kd=0; kd<3; kd++) {
-
-    /* Make a boundary-atom list, LSB---------------------------------*/
-
-    /* Reset the # of to-be-copied atoms for lower&higher directions */
-    for (kdd=0; kdd<2; kdd++) lsb[2*kd+kdd][0] = 0;
-
-    /* Scan all the residents & copies to identify boundary atoms */ 
-    for (i=0; i<n+nbnew; i++) {
-      for (kdd=0; kdd<2; kdd++) {
-        ku = 2*kd+kdd; /* Neighbor ID */
-        /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
-           according to bit-condition function, bbd */
-        if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
-      }
-    }
-
-    /* Message passing------------------------------------------------*/
-
-    com1=MPI_Wtime(); /* To calculate the communication time */
-
-    /* Loop over the lower & higher directions */
-    for (kdd=0; kdd<2; kdd++) {
-
-      inode = nn[ku=2*kd+kdd]; /* Neighbor node ID */
-
-      /* Send & receive the # of boundary atoms-----------------------*/
-
-      nsd = lsb[ku][0]; /* # of atoms to be sent */
-
-      /* Even node: send & recv */
-      if (myparity[kd] == 0) {
-        MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-        MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-                 MPI_COMM_WORLD,&status);
-      }
-      /* Odd node: recv & send */
-      else if (myparity[kd] == 1) {
-        MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-                 MPI_COMM_WORLD,&status);
-        MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-      }
-      /* Single layer: Exchange information with myself */
-      else
-        nrc = nsd;
-      /* Now nrc is the # of atoms to be received */
-
-      /* Send & receive information on boundary atoms-----------------*/
-
-      /* Message buffering */
-      for (i=1; i<=nsd; i++)
-        for (a=0; a<3; a++) /* Shift the coordinate origin */
-          dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a]; 
-
-      /* Even node: send & recv */
-      if (myparity[kd] == 0) {
-        MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-        MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-                 MPI_COMM_WORLD,&status);
-      }
-      /* Odd node: recv & send */
-      else if (myparity[kd] == 1) {
-        MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-                 MPI_COMM_WORLD,&status);
-        MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-      }
-      /* Single layer: Exchange information with myself */
-      else
-        for (i=0; i<3*nrc; i++) dbufr[i] = dbuf[i];
-
-      /* Message storing */
-      for (i=0; i<nrc; i++)
-        for (a=0; a<3; a++) r[n+nbnew+i][a] = dbufr[3*i+a]; 
-
-      /* Increment the # of received boundary atoms */
-      nbnew = nbnew+nrc;
-
-      /* Internode synchronization */
-      MPI_Barrier(MPI_COMM_WORLD);
-
-    } /* Endfor lower & higher directions, kdd */
-
-    comt += MPI_Wtime()-com1; /* Update communication time, COMT */
-
-  } /* Endfor x, y & z directions, kd */
-
-  /* Main loop over x, y & z directions ends--------------------------*/
-
-  /* Update the # of received boundary atoms */
-  nb = nbnew;
 }
 
 /*--------------------------------------------------------------------*/
@@ -651,7 +626,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
 
     } /* Endfor lower & higher directions, kdd */
 
-    comt=comt+MPI_Wtime()-com1;
+X+    comt=comt+MPI_Wtime()-com1;
 
   } /* Endfor x, y & z directions, kd */
   
