@@ -67,16 +67,19 @@ public:
   /* Vector index of this processor */
   array<int, 3> vid;
   array<int, 3> myparity;
+  array<int, 6> nn; 
   array<double, 3> vSum, gvSum, vMag;
   vector<Atom> atoms;
 
+  /* Create cell with by taking the parameters for InitUcell and InitTemp 
+     we calculate the number of atoms and random velocities */
   Cell(array<int, 3> InitUcell, double InitTemp) {
 
     array<double, 3> c,gap;
     int j,a,nX,nY,nZ;
 
       /* FCC atoms in the original unit cell */
-    vector<vector<double> > = {{0.0, 0.0, 0.0}, {0.0, 0.5, 0.5},
+    vector<vector<double> > origAtom = {{0.0, 0.0, 0.0}, {0.0, 0.5, 0.5},
                            {0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
 
     /* Set up a face-centered cubic (fcc) lattice */
@@ -97,58 +100,27 @@ public:
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
 	    atom.vz = sqrt(3*InitTemp)*drand48();
 	    atoms.push_back(atom);
+
+	    vSum[0] += atom.vx;
+	    vSum[1] += atom.vy;
+	    vSum[2] += atom.vz;
 	  }
 	}
       }
     }
-    
-    absx = ax;
-    absy = ay;
-    absz = az;
-    //  We will be filling the cells, making sure than
-    //  No atom is less than 2 Angstroms from another
-    double rcelldim = double(CellDim);
-    double centerx = rcelldim*double(ax) + 0.5*rcelldim;
-    double centery = rcelldim*double(ay) + 0.5*rcelldim;
-    double centerz = rcelldim*double(az) + 0.5*rcelldim;
-   
-    // Randomly initialize particles to be some distance 
-    // from the center of the square
-    // place first atom in cell
-    particles[0].x = centerx + ((drand48()-0.5)*(CellDim-2));
-    particles[0].y = centery + ((drand48()-0.5)*(CellDim-2));
-    particles[0].z = centerz + ((drand48()-0.5)*(CellDim-2));
-    
-    double r,rx,ry;
-    for (int i = 1; i < particles.size(); i++) {
-      r = 0;
-      while(r < 2.7) {   // square of 2
-	r = 2.70001;
-	rx = centerx + ((drand48()-0.5)*(CellDim-2)); 
-	ry = centery + ((drand48()-0.5)*(CellDim-2));
-      	//loop over all other current atoms
-	for(int j = 0; j<i; j++){
-	  double rxj = rx - particles[j].x;
-	  double ryj = ry - particles[j].y;
-	  double rzj = ry - particles[j].z;
-	  double rt = rxj*rxj+ryj*ryj+rzj*rzj;
-	  if(rt < r) r=rt;
-	}
-      }
-      particles[i].x = rx;
-      particles[i].y = ry;
-      particles[i].z = rz;
-    }
+
+    /* Make the total momentum zero */
+    for (a=0; a<3; a++) gvSum[a] /= nglob;
+    for (j=0; j<n; j++)
+      for(a=0; a<3; a++) rv[j][a] -= gvSum[a];
   }
 
   void init_neighbor_node(array<int, 3> vproc) {
-    
+    // Prepare neighbor-node ID table for a cell
     vid[0] = pid/(vproc[1]*vproc[2]);
     vid[1] = (pid/vproc[2])%vproc[1];
     vid[2] = pid%vproc[2];
     
-    // Prepare neighbor-node ID table for a cell
-    array<int, 6> nn;
     vector<vector<int > > iv = {
 				{-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}
     };
@@ -176,147 +148,17 @@ public:
 	myparity[a] = 1;
     }
   }
-  
+
+  void HalfKick() {
+    for (std::vector<Atom>::iterator it = atoms.begin() ; it != atoms.end(); ++it) {
+      it->vx += DeltaTH*it->ax;
+      it->vy += DeltaTH*it->ay;
+      it->vz += DeltaTH*it->az;
+    }
+  }
   
   void Communicate(int*** CellMap, int Dimension){
-    // Pack the message
-    PartCoordsBuff[0] = particles.size();
-    for(int i=0;i<particles.size();i++){
-      PartCoordsBuff[1+i*2] = particles[i].x;
-      PartCoordsBuff[1+i*2+1] = particles[i].y;
-    }
-    
-    // Assuming a good MPI layer, communication between two of the same 
-    // processor should be pretty efficient.  Not screening greatly simplifies
-    // the code
-    
-    // i+1,j
-    int ircount =0;
-    if(absx!=Dimension-1){
-      int tag = (absx+1)*Dimension+absy;
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-      		MPI_DOUBLE,CellMap[absx+1][absy][0],
-      		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    //i-1,j
-    if(absx!= 0){
-      int tag = (absx-1)*Dimension+absy;
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx-1][absy][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    // i,j+1
-    if(absy!=Dimension-1){
-      int tag = (absx)*Dimension+(absy+1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    // i,j-1
-    if(absy !=0){
-      int tag = absx*Dimension+(absy-1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx][absy-1][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    // i+1,j+1
-    if(absx != Dimension-1 && absy != Dimension-1){
-      int tag = (absx+1)*Dimension + (absy+1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx+1][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    //i+1,j-1
-    if(absx != Dimension-1 && absy != 0){ 
-      int tag = (absx+1)*Dimension + (absy-1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx+1][absy-1][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    //i-1,j+1
-    if(absx != 0 && absy != Dimension-1){
-      int tag = (absx-1)*Dimension + (absy+1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx-1][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    //i-1,j-1
-    if(absx !=0 && absy !=0){
-      int tag = (absx-1)*Dimension + (absy-1);
-      MPI_Irecv(remote_particles[ircount],NPartPerCell*2+1,
-		MPI_DOUBLE,CellMap[absx-1][absy-1][0],
-	       	tag,MPI_COMM_WORLD,&reqr[ircount]);
-      ircount++;
-    }
-    
-    // Now the sending
-    int iscount = 0;
 
-    //i+1,j   
-    if(absx != Dimension-1){
-      int tag = absx*Dimension + absy;
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx+1][absy][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    // i-1,j
-    if(absx != 0){
-      int tag = absx*Dimension + absy;
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx-1][absy][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    // i,j+1
-    if(absy != Dimension-1){
-      int tag = (absx)*Dimension + (absy);
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    // i,j-1
-    if(absy != 0){
-      int tag = (absx)*Dimension + (absy);
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx][absy-1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    // i+1,j+1
-    if(absx != Dimension-1 && absy != Dimension-1){
-      int tag = (absx)*Dimension + (absy);
-       MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx+1][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    //i+1,j-1
-    if(absx!=Dimension-1 && absy!=0){
-      int tag = (absx)*Dimension + (absy);
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx+1][absy-1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    //i-1,j+1
-    if(absx!=0 && absy!= Dimension-1){
-      int tag = (absx)*Dimension + (absy);
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx-1][absy+1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    //i-1,j-1
-    if(absx!=0 && absy!=0){
-      int tag = (absx)*Dimension + (absy);
-      MPI_Isend(PartCoordsBuff,NPartPerCell*2+1,MPI_DOUBLE,CellMap[absx-1][absy-1][0],
-		tag,MPI_COMM_WORLD,&reqs[iscount]);
-      iscount++;
-    }
-    nreqr = ircount;
-    nreqs = iscount;
   }
   void PostWaits(void){
     MPI_Status statr[8];
@@ -361,32 +203,6 @@ double interact(Particle &atom1, Particle &atom2){
   return interact(atom1,atom2.x,atom2.y,atom2.z);
 }
 
-int ComputeAtomsPerCell(int ***CellMap, 
-			int NRows,int NCols, 
-			int NParts){
-
-  
-  int max = NPartPerCell;
-  for(int i=0;i<NRows;i++)
-    for(int j=0;j<NCols;j++)
-      CellMap[i][j][3] = NPartPerCell;
-  
-  int molsum = NRows*NCols*NPartPerCell;
-  while(molsum < NParts){
-    max++;
-    for(int i=0;i<NRows;i++){
-      for(int j=0;j<NCols;j++){
-	CellMap[i][j][3]++;
-	molsum++;
-	if(molsum >= NParts) {
-	  return max;
-	}
-      }
-    }
-  }
-  return max;
-}
-
 /*--------------------------------------------------------------------*/
 int main(int argc, char **argv) {
 /*--------------------------------------------------------------------*/
@@ -395,35 +211,13 @@ int main(int argc, char **argv) {
   MPI_Init(&argc,&argv); /* Initialize the MPI environment */
   MPI_Comm_rank(MPI_COMM_WORLD, &sid);  /* My processor ID */
 
-  init_params();
-  // set_topology(); This is now implemented in the Cell Object. Each Object makes its neighbor tables
-  init_conf();
-  atom_copy();
-  compute_accel(); /* Computes initial accelerations */ 
-
-  cpu1 = MPI_Wtime();
-  for (stepCount=1; stepCount<=StepLimit; stepCount++) {
-    single_step(); 
-    if (stepCount%StepAvg == 0) eval_props();
-  }
-  cpu = MPI_Wtime() - cpu1;
-  if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,comt);
-
-  MPI_Finalize(); /* Clean up the MPI environment */
-  return 0;
-}
-
-/*--------------------------------------------------------------------*/
-void init_params() {
-/*----------------------------------------------------------------------
-Initializes parameters.
-----------------------------------------------------------------------*/
+  // init_params(); This is brought into the main function
   int a;
   double rr,ri2,ri6,r1;
-  FILE *fp;
+  double Uc, Duc;
 
   /* Read control parameters */
-   ifstream ifs("pmd.in", ifstream::in);
+  ifstream ifs("pmd.in", ifstream::in);
   if(!ifs.is_open()) {
     cerr << "failed to open input file" << endl;
     terminate();
@@ -455,55 +249,23 @@ Initializes parameters.
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
   Uc = 4.0*ri6*(ri6 - 1.0);
   Duc = -48.0*ri6*(ri6 - 0.5)/r1;
-}
 
-/*--------------------------------------------------------------------*/
-void init_conf() {
-/*----------------------------------------------------------------------
-r are initialized to face-centered cubic (fcc) lattice positions.  
-rv are initialized with a random velocity corresponding to Temperature.  
-----------------------------------------------------------------------*/
-  double c[3],gap[3],e[3],vSum[3],gvSum[3],vMag;
-  int j,a,nX,nY,nZ;
-  double seed;
+  // set_topology(); This is now implemented in the Cell object. Each cell makes its neighbor tables
+  // init_conf(); This is now implemented within the Cell constructor
 
-  /* Set up a face-centered cubic (fcc) lattice */
-  for (a=0; a<3; a++) gap[a] = al[a]/InitUcell[a];
-  n = 0;
-  for (nZ=0; nZ<InitUcell[2]; nZ++) {
-    c[2] = nZ*gap[2];
-    for (nY=0; nY<InitUcell[1]; nY++) {
-      c[1] = nY*gap[1];
-      for (nX=0; nX<InitUcell[0]; nX++) {
-        c[0] = nX*gap[0];
-        for (j=0; j<4; j++) {
-          for (a=0; a<3; a++)
-            r[n][a] = c[a] + gap[a]*origAtom[j][a];
-          ++n;
-        }
-      }
-    }
+  atom_copy();
+  compute_accel(); /* Computes initial accelerations */ 
+
+  cpu1 = MPI_Wtime();
+  for (stepCount=1; stepCount<=StepLimit; stepCount++) {
+    single_step(); 
+    if (stepCount%StepAvg == 0) eval_props();
   }
+  cpu = MPI_Wtime() - cpu1;
+  if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,comt);
 
-  vector<Cell> cells(InitUcell[0]*InitUcell[1]*InitUcell[2]);
-
-  /* Generate random velocities */
-  seed = 13597.0+sid;
-  vMag = sqrt(3*InitTemp);
-  for(a=0; a<3; a++) vSum[a] = 0.0;
-  for(j=0; j<n; j++) {
-    RandVec3(e,&seed);
-    for (a=0; a<3; a++) {
-      rv[j][a] = vMag*e[a];
-      vSum[a] = vSum[a] + rv[j][a];
-    }
-  }
-  // MPI_Allreduce(vSum,gvSum,3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-
-  /* Make the total momentum zero */
-  for (a=0; a<3; a++) gvSum[a] /= nglob;
-  for (j=0; j<n; j++)
-    for(a=0; a<3; a++) rv[j][a] -= gvSum[a];
+  MPI_Finalize(); /* Clean up the MPI environment */
+  return 0;
 }
 
 /*--------------------------------------------------------------------*/
