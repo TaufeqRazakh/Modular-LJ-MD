@@ -9,7 +9,6 @@ systems using the Message Passing Interface (MPI) standard.
 #include <vector>
 #include <array>
 #include <random>
-#include "pmd.hpp"
 
 const double ARmass = 39.94800000; //A.U.s
 const double ARsigma = 3.40500000; // Angstroms
@@ -24,7 +23,7 @@ using namespace std;
 // Class for keeping track of the properties for an atom
 class Atom{
 public:
-  int type;             // identifier for atom type
+  double type;             // identifier for atom type
   bool isResident;
   
   double x;		// position in x axis
@@ -56,6 +55,7 @@ public:
   array<int, 3> vid; /* Vector index of this processor */
   array<int, 3> myparity; // Parity of this processor
   array<int, 6> nn; // Neighbor node list of this processor
+  vector<vector<double> > sv; // Shift vector to the 6 neighbors
   array<double, 3> vSum, gvSum; 
   vector<Atom> atoms;
 
@@ -170,121 +170,113 @@ public:
     double com1;
 
     vector<vector<Atom> > lsb; // atom to be send to the
-    
-    /* Main loop over x, y & z directions starts--------------------------*/
 
     // Iterate through neighbour nodes
     for( auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
       // Iterate through all atoms in this cell
-      vector<Atom> outgoing;
+      vector<double> sendBuf;
+      vector<double> recvBuf;
       for( auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
 	it_atom->isResident = 1;
 	if(bbd(*it_atom, *it_neighbor)) {
-	  outgoing.push_back((*it_atom));
+	  sendBuf.push_back(it_send_atom->type);
+	  sendBuf.push_back(it_send_atom->x);   
+	  sendBuf.push_back(it_send_atom->y);   
+	  sendBuf.push_back(it_send_atom->z);
 	  it_atom->isResident = 0;
 	}
-      }
-      lsb.push_back(outgoing);
+      }      
       
       /* Message passing------------------------------------------------*/
 
       com1=MPI_Wtime(); /* To calculate the communication time */
 
-      /* Loop over the lower & higher directions */
-      for (kdd=0; kdd<2; kdd++) {
+      nsd = sendBuf.size(); /* # of atoms to be sent */
+      
+      /* Even node: send & recv */
+      if (myparity[kd] == 0) {
+	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		 MPI_COMM_WORLD,&status);
+      }
+      /* Odd node: recv & send */
+      else if (myparity[kd] == 1) {
+	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		 MPI_COMM_WORLD,&status);
+	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+      }
+      /* Single layer: Exchange information with myself */
+      else
+	nrc = nsd;
+      /* Now nrc is the # of atoms to be received */
 
-	inode = nn[ku=2*kd+kdd]; /* Neighbor node ID */
-
-	/* Send & receive the # of boundary atoms-----------------------*/
-
-	nsd = lsb[ku][0]; /* # of atoms to be sent */
-
-	/* Even node: send & recv */
-	if (myparity[kd] == 0) {
-	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		   MPI_COMM_WORLD,&status);
-	}
-	/* Odd node: recv & send */
-	else if (myparity[kd] == 1) {
-	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		   MPI_COMM_WORLD,&status);
-	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-	}
+      // resize the receive buffer for nrc
+      recvBuf.resize(nrc);
+      
+      /* Even node: send & recv */
+      if (myparity[kd] == 0) {
+	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		 MPI_COMM_WORLD,&status);
+      }
+      /* Odd node: recv & send */
+      else if (myparity[kd] == 1) {
+	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		 MPI_COMM_WORLD,&status);
+	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+      }
 	/* Single layer: Exchange information with myself */
-	else
-	  nrc = nsd;
-	/* Now nrc is the # of atoms to be received */
+      else
+	sendBuf.swap(recvBuf);
 
-	/* Send & receive information on boundary atoms-----------------*/
+      // Message storing
+      for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
+	Atom rAtom;
+	rAtom.type = *it_recv;
+	++it_recv;
+	rAtom.isResident = 1;
+	rAtom.x = *it_recv;
+	++it_recv;
+	rAtom.y = *it_recv;
+	++it_recv;
+	rAtom.z = *it_recv;
 
-	/* Message buffering */
-	for (i=1; i<=nsd; i++)
-	  for (a=0; a<3; a++) /* Shift the coordinate origin */
-	    dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a]; 
+	atoms.push_back(rAtom);       
+      }
+      
+      // Delete sent message after the step finishes
+           
+      /* Internode synchronization */
+      MPI_Barrier(MPI_COMM_WORLD);
+      
+    } /* Endfor lower & higher directions, kdd */
 
-	/* Even node: send & recv */
-	if (myparity[kd] == 0) {
-	  MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-	  MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		   MPI_COMM_WORLD,&status);
-	}
-	/* Odd node: recv & send */
-	else if (myparity[kd] == 1) {
-	  MPI_Recv(dbufr,3*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		   MPI_COMM_WORLD,&status);
-	  MPI_Send(dbuf,3*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-	}
-	/* Single layer: Exchange information with myself */
-	else
-	  for (i=0; i<3*nrc; i++) dbufr[i] = dbuf[i];
-
-	/* Message storing */
-	for (i=0; i<nrc; i++)
-	  for (a=0; a<3; a++) r[n+nbnew+i][a] = dbufr[3*i+a]; 
-
-	/* Increment the # of received boundary atoms */
-	nbnew = nbnew+nrc;
-
-	/* Internode synchronization */
-	MPI_Barrier(MPI_COMM_WORLD);
-
-      } /* Endfor lower & higher directions, kdd */
-
-      comt += MPI_Wtime()-com1; /* Update communication time, COMT */
-
-    } /* Endfor x, y & z directions, kd */
-
-    /* Main loop over x, y & z directions ends--------------------------*/
-
-    /* Update the # of received boundary atoms */
-    nb = nbnew;         
+    comt += MPI_Wtime()-com1; /* Update communication time, COMT */
   }
-
+  
   // Return true if an Atom lies in them boundary to a neighbor ID
   int bbd(Atom atom, int ku) {
-  int kd,kdd;
-  kd = ku/2; /* x(0)|y(1)|z(2) direction */
-  kdd = ku%2; /* Lower(0)|higher(1) direction */
-  if (kdd == 0){
-    if (kd == 0)
-      return atom.x < RCUT;
-    if (kd == 1)
-      return atom.y < RCUT;
-    if (kd == 2)
-      return atom.z < RCUT;
+    if atom.isResident == 0 return 0; // Do not consider atoms that have moved already 
+    int kd,kdd;
+    kd = ku/2; /* x(0)|y(1)|z(2) direction */
+    kdd = ku%2; /* Lower(0)|higher(1) direction */
+    if (kdd == 0){
+      if (kd == 0)
+	return atom.x < RCUT;
+      if (kd == 1)
+	return atom.y < RCUT;
+      if (kd == 2)
+	return atom.z < RCUT;
+    }
+    else {
+      if (kd == 0)
+	return al[0]-RCUT < atom.x;
+      if (kd == 1)
+	return al[1]-RCUT < atom.y;
+      if (kd == 2)
+	return al[2]-RCUT < atom.z;
+    } 
   }
-  else {
-    if (kd == 0)
-      return al[0]-RCUT < atom.x;
-    if (kd == 1)
-      return al[1]-RCUT < atom.y;
-    if (kd == 2)
-      return al[2]-RCUT < atom.z;
-  }
-
-}
-
 };
     
 //Force calculation
@@ -672,15 +664,6 @@ Bit condition functions:
 2. bmv(ri,ku) is .true. if an atom with coordinate ri[3] has moved out 
      to neighbor ku.
 ----------------------------------------------------------------------*/
-int bbd(double* ri, int ku) {
-  int kd,kdd;
-  kd = ku/2; /* x(0)|y(1)|z(2) direction */
-  kdd = ku%2; /* Lower(0)|higher(1) direction */
-  if (kdd == 0)
-    return ri[kd] < RCUT;
-  else
-    return al[kd]-RCUT < ri[kd];
-}
 int bmv(double* ri, int ku) {
   int kd,kdd;
   kd = ku/2; /* x(0)|y(1)|z(2) direction */
