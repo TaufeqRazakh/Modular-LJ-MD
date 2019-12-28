@@ -15,6 +15,8 @@ const double ARmass = 39.94800000; //A.U.s
 const double ARsigma = 3.40500000; // Angstroms
 const double AReps   = 119.800000; // Kelvins
 const double CellDim = 12.0000000; // Angstroms
+
+const double RCUT = 2.5; / /Potential cut-off length
 int NPartPerCell = 10;
 
 using namespace std;
@@ -23,6 +25,7 @@ using namespace std;
 class Atom{
 public:
   int type;             // identifier for atom type
+  bool isResident;
   
   double x;		// position in x axis
   double y;		// position in y axis
@@ -37,7 +40,7 @@ public:
   double vz;            // velocity on y axis
   // Default constructor
   Atom() 
-    : type(0),x(0.0),y(0.0),z(0.0),
+    : type(0),isResident(1),x(0.0),y(0.0),z(0.0),
       ax(0.0),ay(0.0),az(0.0),vx(0.0),vy(0.0),vz(0.0){
   }
 };
@@ -49,23 +52,27 @@ public:
   int pid; //sequential processor ID of this cell
   MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
-  /* Vector index of this processor */
-  array<int, 3> vid;
-  array<int, 3> myparity;
-  array<int, 6> nn; 
-  array<double, 3> vSum, gvSum;
+  array<int, 3> al; // Box length per processor
+  array<int, 3> vid; /* Vector index of this processor */
+  array<int, 3> myparity; // Parity of this processor
+  array<int, 6> nn; // Neighbor node list of this processor
+  array<double, 3> vSum, gvSum; 
   vector<Atom> atoms;
 
   /* Create cell with by taking the parameters for InitUcell and InitTemp 
      we calculate the number of atoms and give them random velocities */
-  Cell(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp) {
+  Cell(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density) {
     default_random_engine generator;
     normal_distribution<double> distribution(1,1);
+
+    /* Compute basic parameters */
+    for (a=0; a<3; a++) al[a] = InitUcell[a]/cbrt(Density/4.0);
+    if (pid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
   
     // Prepare the Neighbot-node table
     InitNeighborNode(vproc);
 
-    //  Initialize lattice positions and assign random velocities
+    // Initialize lattice positions and assign random velocities
     array<double, 3> c,gap;
     int j,a,nX,nY,nZ;
 
@@ -162,25 +169,23 @@ public:
     int nbnew = 0; /* # of "received" boundary atoms */
     double com1;
 
+    vector<vector<Atom> > lsb; // atom to be send to the
+    
     /* Main loop over x, y & z directions starts--------------------------*/
 
-    for (kd=0; kd<3; kd++) {
-
-      /* Make a boundary-atom list, LSB---------------------------------*/
-
-      /* Reset the # of to-be-copied atoms for lower&higher directions */
-      for (kdd=0; kdd<2; kdd++) lsb[2*kd+kdd][0] = 0;
-
-      /* Scan all the residents & copies to identify boundary atoms */ 
-      for (i=0; i<n+nbnew; i++) {
-	for (kdd=0; kdd<2; kdd++) {
-	  ku = 2*kd+kdd; /* Neighbor ID */
-	  /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
-	     according to bit-condition function, bbd */
-	  if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
+    // Iterate through neighbour nodes
+    for( auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
+      // Iterate through all atoms in this cell
+      vector<Atom> outgoing;
+      for( auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
+	it_atom->isResident = 1;
+	if(bbd(*it_atom, *it_neighbor)) {
+	  outgoing.push_back((*it_atom));
+	  it_atom->isResident = 0;
 	}
       }
-
+      lsb.push_back(outgoing);
+      
       /* Message passing------------------------------------------------*/
 
       com1=MPI_Wtime(); /* To calculate the communication time */
@@ -255,6 +260,31 @@ public:
     /* Update the # of received boundary atoms */
     nb = nbnew;         
   }
+
+  // Return true if an Atom lies in them boundary to a neighbor ID
+  int bbd(Atom atom, int ku) {
+  int kd,kdd;
+  kd = ku/2; /* x(0)|y(1)|z(2) direction */
+  kdd = ku%2; /* Lower(0)|higher(1) direction */
+  if (kdd == 0){
+    if (kd == 0)
+      return atom.x < RCUT;
+    if (kd == 1)
+      return atom.y < RCUT;
+    if (kd == 2)
+      return atom.z < RCUT;
+  }
+  else {
+    if (kd == 0)
+      return al[0]-RCUT < atom.x;
+    if (kd == 1)
+      return al[1]-RCUT < atom.y;
+    if (kd == 2)
+      return al[2]-RCUT < atom.z;
+  }
+
+}
+
 };
     
 //Force calculation
@@ -319,21 +349,6 @@ int main(int argc, char **argv) {
 
   ifs.close();
   
-  /* Compute basic parameters */
-  DeltaTH = 0.5*DeltaT;
-  for (a=0; a<3; a++) al[a] = InitUcell[a]/pow(Density/4.0,1.0/3.0);
-  if (sid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
-
-  /* Compute the # of cells for linked cell lists */
-  for (a=0; a<3; a++) {
-    lc[a] = al[a]/RCUT; 
-    rc[a] = al[a]/lc[a];
-  }
-  if (sid == 0) {
-    printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]);
-    printf("rc = %e %e %e\n",rc[0],rc[1],rc[2]);
-  }
-
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
   Uc = 4.0*ri6*(ri6 - 1.0);
