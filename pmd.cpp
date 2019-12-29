@@ -9,14 +9,14 @@ systems using the Message Passing Interface (MPI) standard.
 #include <vector>
 #include <array>
 #include <random>
+#include "mpi.h"
 
 const double ARmass = 39.94800000; //A.U.s
 const double ARsigma = 3.40500000; // Angstroms
 const double AReps   = 119.800000; // Kelvins
 const double CellDim = 12.0000000; // Angstroms
 
-const double RCUT = 2.5; / /Potential cut-off length
-int NPartPerCell = 10;
+const double RCUT = 2.5; // Potential cut-off length
 
 using namespace std;
 
@@ -39,7 +39,7 @@ public:
   double vz;            // velocity on y axis
   // Default constructor
   Atom() 
-    : type(0),isResident(1),x(0.0),y(0.0),z(0.0),
+    : type(0),isResident(true),x(0.0),y(0.0),z(0.0),
       ax(0.0),ay(0.0),az(0.0),vx(0.0),vy(0.0),vz(0.0){
   }
 };
@@ -47,7 +47,7 @@ public:
 
 class Cell {
 public:
-  
+
   int pid; //sequential processor ID of this cell
   MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
@@ -56,9 +56,11 @@ public:
   array<int, 3> myparity; // Parity of this processor
   array<int, 6> nn; // Neighbor node list of this processor
   vector<vector<double> > sv; // Shift vector to the 6 neighbors
-  array<double, 3> vSum, gvSum; 
+  array<double, 3> vSum, gvSum;
   vector<Atom> atoms;
-
+  int n; // Number of resident atoms in this processor
+  double comt; // elapsed wall clock time & Communication time in second
+  
   /* Create cell with by taking the parameters for InitUcell and InitTemp 
      we calculate the number of atoms and give them random velocities */
   Cell(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density) {
@@ -109,15 +111,19 @@ public:
       }
     }
 
-    int n = atoms.size();
+    n = atoms.size();
     int nglob; // Total number of atoms summed over processors
     MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-
-    MPI_Allreduce(vSum,gvSum,3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-
+    
+    MPI_Allreduce(&vSum[0],&gvSum[0],3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+    
+    // Make the total momentum zero
     for (a=0; a<3; a++) gvSum[a] /= nglob;
-    for (j=0; j<n; j++)
-      for(a=0; a<3; a++) rv[j][a] -= gvSum[a];
+    for(auto & atom : atoms) {
+      atom.vx -= gvSum[0];
+      atom.vy -= gvSum[1];
+      atom.vz -= gvSum[2];
+    }
   }
 
   void InitNeighborNode(array<int, 3> vproc) {
@@ -156,10 +162,10 @@ public:
 
   // Update the velocities after a time-step DeltaT
   void HalfKick(double DeltaT) {
-    for (std::vector<Atom>::iterator it = atoms.begin() ; it != atoms.end(); ++it) {
-      it->vx += DeltaT*it->ax;
-      it->vy += DeltaT*it->ay;
-      it->vz += DeltaT*it->az;
+    for (auto & atom : atoms) {
+      atom.vx += DeltaT*atom.ax;
+      atom.vy += DeltaT*atom.ay;
+      atom.vz += DeltaT*atom.az;
     }
   }
 
@@ -177,18 +183,25 @@ public:
       vector<double> sendBuf;
       vector<double> recvBuf;
       for( auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
-	it_atom->isResident = 1;
 	if(bbd(*it_atom, *it_neighbor)) {
-	  sendBuf.push_back(it_send_atom->type);
-	  sendBuf.push_back(it_send_atom->x);   
-	  sendBuf.push_back(it_send_atom->y);   
-	  sendBuf.push_back(it_send_atom->z);
-	  it_atom->isResident = 0;
+	  sendBuf.push_back(it_atom->type);
+	  sendBuf.push_back(it_atom->x);
+	  sendBuf.push_back(it_atom->y);
+	  sendBuf.push_back(it_atom->z);
+	  it_atom->isResident = false;
 	}
       }      
       
       /* Message passing------------------------------------------------*/
 
+      // the first two neighbors need a x - parity check and so on
+      if(distance(nn.begin(), it_neighbor) < 2)
+	kd = 0;
+      else if(distance(nn.begin(), it_neighbor) < 4)
+	kd =1;
+      else
+	kd =2;
+      
       com1=MPI_Wtime(); /* To calculate the communication time */
 
       nsd = sendBuf.size(); /* # of atoms to be sent */
@@ -197,12 +210,12 @@ public:
       if (myparity[kd] == 0) {
 	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
 	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		 MPI_COMM_WORLD,&status);
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       }
       /* Odd node: recv & send */
       else if (myparity[kd] == 1) {
 	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		 MPI_COMM_WORLD,&status);
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
       }
       /* Single layer: Exchange information with myself */
@@ -217,12 +230,12 @@ public:
       if (myparity[kd] == 0) {
 	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
 	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		 MPI_COMM_WORLD,&status);
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       }
       /* Odd node: recv & send */
       else if (myparity[kd] == 1) {
 	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		 MPI_COMM_WORLD,&status);
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
 	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
       }
 	/* Single layer: Exchange information with myself */
@@ -232,9 +245,10 @@ public:
       // Message storing
       for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
 	Atom rAtom;
+	
 	rAtom.type = *it_recv;
 	++it_recv;
-	rAtom.isResident = 1;
+	rAtom.isResident = true;
 	rAtom.x = *it_recv;
 	++it_recv;
 	rAtom.y = *it_recv;
@@ -253,10 +267,125 @@ public:
 
     comt += MPI_Wtime()-com1; /* Update communication time, COMT */
   }
+
+  // Send moved-out atoms to neighbor nodes and receive moved-in atoms
+  // from neighbor nodes
+  void AtomMove() {
+    int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
+    int newim = 0; /* # of new immigrants */
+    double com1;
+
+    // Neglect the atoms in them cell that have entered throgh AtomCopy()
+    atoms.resize(n);
+    
+    // Iterate through neighbour nodes
+    for(auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
+      // Iterate through all atoms in this cell
+      vector<double> sendBuf;
+      vector<double> recvBuf;
+      for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
+	if(bmv(*it_atom, *it_neighbor)) {
+	  sendBuf.push_back(it_atom->type);
+	  sendBuf.push_back(it_atom->x);
+	  sendBuf.push_back(it_atom->y);
+	  sendBuf.push_back(it_atom->z);
+	  // In AtomMove we will also be considering the velocities
+	  sendBuf.push_back(it_atom->vx);
+	  sendBuf.push_back(it_atom->vy);
+	  sendBuf.push_back(it_atom->vz);
+	  
+	  it_atom->isResident = false;
+	}
+      }      
+      
+      /* Message passing------------------------------------------------*/
+
+      // the first two neighbors need a x - parity check and so on
+      if(distance(nn.begin(), it_neighbor) < 2)
+	kd = 0;
+      else if(distance(nn.begin(), it_neighbor) < 4)
+	kd =1;
+      else
+	kd =2;
+      
+      com1=MPI_Wtime(); /* To calculate the communication time */
+
+      nsd = sendBuf.size(); /* # of atoms to be sent */
+      
+      /* Even node: send & recv */
+      if (myparity[kd] == 0) {
+	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      }
+      /* Odd node: recv & send */
+      else if (myparity[kd] == 1) {
+	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+      }
+      /* Single layer: Exchange information with myself */
+      else
+	nrc = nsd;
+      /* Now nrc is the # of atoms to be received */
+
+      // resize the receive buffer for nrc
+      recvBuf.resize(nrc);
+      
+      /* Even node: send & recv */
+      if (myparity[kd] == 0) {
+	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      }
+      /* Odd node: recv & send */
+      else if (myparity[kd] == 1) {
+	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+      }
+	/* Single layer: Exchange information with myself */
+      else
+	sendBuf.swap(recvBuf);
+
+      // Message storing
+      for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
+	Atom rAtom;
+	
+	rAtom.type = *it_recv;
+	++it_recv;
+	rAtom.isResident = true;
+	rAtom.x = *it_recv;
+	++it_recv;
+	rAtom.y = *it_recv;
+	++it_recv;
+	rAtom.z = *it_recv;
+	++it_recv;
+	rAtom.vx = *it_recv;
+	++it_recv;
+	rAtom.vy = *it_recv;
+	++it_recv;
+	rAtom.vz = *it_recv;	
+
+	atoms.push_back(rAtom);       
+      }
+      
+      // Delete sent message after the step finishes
+           
+      /* Internode synchronization */
+      MPI_Barrier(MPI_COMM_WORLD);
+      
+    } /* Endfor lower & higher directions, kdd */
+
+    atoms.erase(remove_if(atoms.begin(), atoms.end(), 
+                       [](Atom atom) { return atom.isResident; }), atoms.end());
+
+    comt += MPI_Wtime()-com1; /* Update communication time, COMT */
+  }
   
   // Return true if an Atom lies in them boundary to a neighbor ID
   int bbd(Atom atom, int ku) {
-    if atom.isResident == 0 return 0; // Do not consider atoms that have moved already 
+    if (atom.isResident == 0) return 0; // Do not consider atoms that have moved already 
     int kd,kdd;
     kd = ku/2; /* x(0)|y(1)|z(2) direction */
     kdd = ku%2; /* Lower(0)|higher(1) direction */
@@ -277,56 +406,58 @@ public:
 	return al[2]-RCUT < atom.z;
     } 
   }
+
+  // Return true if an Atom lies in them boundary to a neighbor ID
+  int bmv(Atom atom, int ku) {
+    if (atom.isResident == 0) return 0; // Do not consider atoms that have moved already 
+    int kd,kdd;
+    kd = ku/2; /* x(0)|y(1)|z(2) direction */
+    kdd = ku%2; /* Lower(0)|higher(1) direction */
+    if (kdd == 0){
+      if (kd == 0)
+	return atom.x < 0.0;
+      if (kd == 1)
+	return atom.y < 0.0;
+      if (kd == 2)
+	return atom.z < 0.0;
+    }
+    else {
+      if (kd == 0)
+	return al[0] < atom.x;
+      if (kd == 1)
+	return al[1] < atom.y;
+      if (kd == 2)
+	return al[2] < atom.z;
+    } 
+  }
 };
-    
-//Force calculation
-//------------------------------------
-// Overloaded to handle new case
-double interact(Particle &atom1, double atom2x, double atom2y. double atom2z){
-  double rx,ry,rz,r,fx,fy,fz,f;
-  double sigma6,sigma12;
-  
-  // computing base values
-  rx = atom1.x - atom2x;
-  ry = atom1.y - atom2y;
-  rz = atom1.z - atom2z;
-  r = rx*rx + ry*ry +  rz*rz;
-
-  if(r < 0.000001)
-    return 0.0;
-  
-  r=sqrt(r);
-  double sigma2 = (ARsigma/r)*(ARsigma/r);
-  sigma6 = sigma2*sigma2*sigma2;
-  sigma12 = sigma6*sigma6;
-  f = ((sigma12-0.5*sigma6)*48.0*AReps)/r;
-  fx = f * rx;
-  fy = f * ry;
-  fz = f * rz;
-  // updating particle properties
-  atom1.fx += fx;
-  atom1.fy += fy;
-  atom1.fz += fz;
-  return 4.0*AReps*(sigma12-sigma6);
-}
-
-double interact(Particle &atom1, Particle &atom2){
-  return interact(atom1,atom2.x,atom2.y,atom2.z);
-}
 
 /*--------------------------------------------------------------------*/
 int main(int argc, char **argv) {
 /*--------------------------------------------------------------------*/
   double cpu1;
 
+  int sid; // Sequential processor ID
   MPI_Init(&argc,&argv); /* Initialize the MPI environment */
   MPI_Comm_rank(MPI_COMM_WORLD, &sid);  /* My processor ID */
 
+  // vproc - number of processrs in x|y|z directions
+  // Initucell - Number of unit cells per processor
+  array<int, 3> vproc, InitUcell; 
   // init_params(); This is brought into the main function
-  int a;
+
+  // Density - Density of atoms
+  // InitTemp - Starting temperature
+  // DeltaT - Size of time step
+  // StepLimit - Number of time steps to be simulated
+  // StepAvg - Reporting interval forces statistical data
+  double Density, InitTemp, DeltaT;
+  int StepLimit, StepAvg;
+  
   double rr,ri2,ri6,r1;
   double Uc, Duc;
-
+  
+  
   /* Read control parameters */
   ifstream ifs("pmd.in", ifstream::in);
   if(!ifs.is_open()) {
