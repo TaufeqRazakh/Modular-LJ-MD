@@ -49,7 +49,6 @@ class Cell {
 public:
 
   int pid; //sequential processor ID of this cell
-  MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
   array<int, 3> al; // Box length per processor
   array<int, 3> vid; /* Vector index of this processor */
@@ -64,11 +63,14 @@ public:
   /* Create cell with by taking the parameters for InitUcell and InitTemp 
      we calculate the number of atoms and give them random velocities */
   Cell(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density) {
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+
     default_random_engine generator;
     normal_distribution<double> distribution(1,1);
 
     /* Compute basic parameters */
-    for (a=0; a<3; a++) al[a] = InitUcell[a]/cbrt(Density/4.0);
+    for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
     if (pid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
   
     // Prepare the Neighbot-node table
@@ -81,9 +83,7 @@ public:
     /* FCC atoms in the original unit cell */
     vector<vector<double> > origAtom = {{0.0, 0.0, 0.0}, {0.0, 0.5, 0.5},
 					{0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
-
     
-
     /* Set up a face-centered cubic (fcc) lattice */
     for (a=0; a<3; a++) gap[a] = al[a]/InitUcell[a];
 
@@ -378,7 +378,7 @@ public:
     } /* Endfor lower & higher directions, kdd */
 
     atoms.erase(remove_if(atoms.begin(), atoms.end(), 
-                       [](Atom atom) { return atom.isResident; }), atoms.end());
+                       [](Atom atom) { return !atom.isResident; }), atoms.end());
     n = atoms.size();
 
     comt += MPI_Wtime()-com1; /* Update communication time, COMT */
