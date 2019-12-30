@@ -50,28 +50,34 @@ public:
 
   int pid; //sequential processor ID of this cell
 
-  array<int, 3> myParity; // Parity of this processor
+  array<int, 3> al; // Box length per processor
+  array<int, 3> vid; /* Vector index of this processor */
+  array<int, 3> myparity; // Parity of this processor
   array<int, 6> nn; // Neighbor node list of this processor
-  vector<int> cellList; // Scalar cell index list for the subsystem
   vector<vector<double> > sv; // Shift vector to the 6 neighbors
   array<double, 3> vSum, gvSum;
-  vector<Atom> systemAtoms; // all atoms within the processor
+  vector<Atom> atoms;
   int n; // Number of resident atoms in this processor
+  int nglob; // Total number of atoms summed over processors
   double comt; // elapsed wall clock time & Communication time in second
+
+  double KinEnergy,potEnergy,totEnergy,temperature;
   
-  /* Create cell with by taking the parameters for InitUcell and InitTemp 
-     we calculate the number of atoms and give them random velocities */
-  SubSystem(array<int, 6> neighborNode, array<int, 3> parityTable, sid){
-    nn = neighborNode;
-    myParity = parityTable;
-    pid = sid;
+  /* Create subsystem with parameters input parameters to calculate 
+     the number of atoms and give them random velocities */
+  SubSystem(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density) {
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
     default_random_engine generator;
     normal_distribution<double> distribution(1,1);
-    
+
     /* Compute basic parameters */
     for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
     if (pid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
+  
+    // Prepare the Neighbot-node table
+    InitNeighborNode(vproc);
 
     // Initialize lattice positions and assign random velocities
     array<double, 3> c,gap;
@@ -98,7 +104,7 @@ public:
 	    atom.vy = sqrt(3*InitTemp)*distribution(generator);
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
 	    atom.vz = sqrt(3*InitTemp)*drand48();
-	    systemAtoms.push_back(atom);
+	    atoms.push_back(atom);
 
 	    vSum[0] += atom.vx;
 	    vSum[1] += atom.vy;
@@ -109,7 +115,7 @@ public:
     }
 
     n = atoms.size();
-    int nglob; // Total number of atoms summed over processors
+
     MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     
     MPI_Allreduce(&vSum[0],&gvSum[0],3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
@@ -123,8 +129,42 @@ public:
     }
   }
 
+  void InitNeighborNode(array<int, 3> vproc) {
+    // Prepare neighbor-node ID table for a subsystem
+    vid[0] = pid/(vproc[1]*vproc[2]);
+    vid[1] = (pid/vproc[2])%vproc[1];
+    vid[2] = pid%vproc[2];
+    
+    vector<vector<int > > iv = {
+				{-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}
+    };
+    
+    int ku, a, k1[3];
+    
+    /* Set up neighbor tables, nn & sv */
+    for (ku=0; ku<6; ku++) {
+      /* Vector index of neighbor ku */
+      for (a=0; a<3; a++)
+	k1[a] = (vid[a]+iv[ku][a]+vproc[a])%vproc[a];
+      /* Scalar neighbor ID, nn */
+      nn[ku] = k1[0]*vproc[1]*vproc[2]+k1[1]*vproc[2]+k1[2];
+      /* Shift vector, sv */
+      for (a=0; a<3; a++) sv[ku][a] = al[a]*iv[ku][a];
+    }
+    
+    // Set up node parity table
+    for (a=0; a<3; a++) {
+      if (vproc[a] == 1) 
+	myparity[a] = 2;
+      else if (vid[a]%2 == 0)
+	myparity[a] = 0;
+      else
+	myparity[a] = 1;
+    }
+  }
+
   // Update the velocities after a time-step DeltaT
-  void HalfKick(double DeltaT) {
+  void Kick(double DeltaT) {
     for (auto & atom : atoms) {
       atom.vx += DeltaT*atom.ax;
       atom.vy += DeltaT*atom.ay;
@@ -394,6 +434,33 @@ public:
 	return al[2] < atom.z;
     } 
   }
+
+  /*--------------------------------------------------------------------*/
+  void EvalProps(int stepCount, double DeltaT) {
+    /*----------------------------------------------------------------------
+      Evaluates physical properties: kinetic, potential & total energies.
+      ----------------------------------------------------------------------*/
+    double vv,lke;
+    int i,a;
+
+    /* Total kinetic energy */
+    for (lke=0.0, i=0; i<n; i++) {
+      for (vv=0.0, a=0; a<3; a++) vv += rv[i][a]*rv[i][a];
+      lke += vv;
+    }
+    lke *= 0.5;
+    MPI_Allreduce(&lke,&kinEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+
+    /* Energy paer atom */
+    kinEnergy /= nglob;
+    potEnergy /= nglob;
+    totEnergy = kinEnergy + potEnergy;
+    temperature = kinEnergy*2.0/3.0;
+
+    /* Print the computed properties */
+    if (pid == 0) printf("%9.6f %9.6f %9.6f %9.6f\n",
+			 stepCount*DeltaT,temperature,potEnergy,totEnergy);
+  }
 };
 
 /*--------------------------------------------------------------------*/
@@ -406,15 +473,15 @@ int main(int argc, char **argv) {
   MPI_Comm_rank(MPI_COMM_WORLD, &sid);  /* My processor ID */
 
   // vproc - number of processrs in x|y|z directions
-  // Initucell - Number of unit cells per processor
+  // Initucell - Number of unit cells per processor 
   // Density - Density of atoms
   // InitTemp - Starting temperature
   // DeltaT - Size of time step
   // StepLimit - Number of time steps to be simulated
   // StepAvg - Reporting interval forces statistical data
-  array<int, 3> vproc, InitUcell; 
+  array<int, 3> vproc, InitUcell;
   double Density, InitTemp, DeltaT;
-  int StepLimit, StepAvg;  
+  int StepLimit, StepAvg;
   
   /* Read control parameters */
   ifstream ifs("pmd.in", ifstream::in);
@@ -430,48 +497,18 @@ int main(int argc, char **argv) {
 
   ifs.close();
 
-  array<int, 3> vid{}; /* Vector index of this processor */
-  vid[0] = pid/(vproc[1]*vproc[2]);
-  vid[1] = (pid/vproc[2])%vproc[1];
-  vid[2] = pid%vproc[2];
+  // set_topology(); This is now implemented in the Cell object. Each cell makes its neighbor tables
+  // init_conf(); This is now implemented within the Cell constructor
+
+  SubSystem subsystem;
+  subsystem.AtomCopy();
+  ComputeAccel(subsystem, DeltaT);
   
-  /* Compute basic parameters */
-  Double DeltaTH = 0.5*DeltaT; // Half the time step
-
-  int a; //iterator variable
-
-  array<int, 3> al{}; // Box length per processor since each subsystem is a parallel-piped
-  for (a=0; a<al.size(); a++) al[a] = InitUcell[a]/cbrt(Density/4.0);
-
-  array<int ,3> lc{}, rc{};
-  /* Compute the # of cells for linked cell lists */
-  for (a=0; a<3; a++) {
-    lc[a] = al[a]/RCUT; 
-    rc[a] = al[a]/lc[a];
-  }
-
-  if(sid == 0) {
-    cout << "al = " << al[0] << al[1] << al[2] << endl;
-    cout << "lc = " << lc[0] << lc[1] << lc[2] << endl;
-    cout << "rc = " << rc[0] << rc[1] << rc[2] << end;
-  }
-
-  array<int, 3> nn{}, myParity{};
-  
-  SetTopology(nn, myParity, vid, vproc); // Uses reference to fill up nn and myparity
-
-  // This section emulates init_conf and sets up cells in the processor
-  SubSystem s;
-
-  s.AtomCopy();
-  compute_accel(s);
-
   cpu1 = MPI_Wtime();
   for (stepCount=1; stepCount<=StepLimit; stepCount++) {
-    single_step(); 
-    if (stepCount%StepAvg == 0) eval_props();
+    SingleStep(subsystem); 
+    if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
-  
   cpu = MPI_Wtime() - cpu1;
   if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,comt);
 
@@ -479,77 +516,59 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-void SetTopology(array<int, 3> &nn, array<int, 3> &myParity, array<int, 3> vid, array<int, 3> vproc) {
-  // Prepare neighbor-node ID table for a cell        
-  vector<vector<int > > iv = {
-			      {-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}
-  };
-  
-  int ku, a, k1[3];
-  
-  /* Set up neighbor tables, nn & sv */
-  for (ku=0; ku<6; ku++) {
-    /* Vector index of neighbor ku */
-    for (a=0; a<3; a++)
-      k1[a] = (vid[a]+iv[ku][a]+vproc[a])%vproc[a];
-    /* Scalar neighbor ID, nn */
-    nn[ku] = k1[0]*vproc[1]*vproc[2]+k1[1]*vproc[2]+k1[2];
-    /* Shift vector, sv */
-    for (a=0; a<3; a++) sv[ku][a] = al[a]*iv[ku][a];
-  }
-  
-  // Set up node parity table
-  for (a=0; a<3; a++) {
-    if (vproc[a] == 1) 
-      myparity[a] = 2;
-    else if (vid[a]%2 == 0)
-      myparity[a] = 0;
-    else
-      myparity[a] = 1;
-  }
-}
-
 /*--------------------------------------------------------------------*/
-void single_step() {
+void SingleStep(SubSystem &subsystem, double DeltaT) {
 /*----------------------------------------------------------------------
 r & rv are propagated by DeltaT using the velocity-Verlet scheme.
 ----------------------------------------------------------------------*/
   int i,a;
 
-  half_kick(); /* First half kick to obtain v(t+Dt/2) */
+  double DeltaTH = DeltaT / 2.0;
+  subsystem.Kick(DeltaTH); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  atom_move();
-  atom_copy();
-  compute_accel(); /* Computes new accelerations, a(t+Dt) */
-  half_kick(); /* Second half kick to obtain v(t+Dt) */
+  subsystem.AtomMove();
+  subsystem.AtomCopy();
+  ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
+  subsystem.Kick(DeltaTH); /* Second half kick to obtain v(t+Dt) */
 }
 
 /*--------------------------------------------------------------------*/
-void compute_accel(SubSystem &s) {
+void ComputeAccel(SubSystem &subsystem) {
 /*----------------------------------------------------------------------
 Given atomic coordinates, r[0:n+nb-1][], for the extended (i.e., 
 resident & copied) system, computes the acceleration, ra[0:n-1][], for 
 the residents.
 ----------------------------------------------------------------------*/
+  int i,j,a,lc2[3],lcyz2,lcxyz2,mc[3],c,mc1[3],c1;
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
 
   double rr,ri2,ri6,r1;
   double Uc, Duc;
 
-  vector<Atom>::iterator it_atom;
+  array<int, 3> lc{}, rc{};
+  /* Compute the # of cells for linked cell lists */
+  for (a=0; a<3; a++) {
+    lc[a] = al[a]/RCUT; 
+    rc[a] = al[a]/lc[a];
+  }
+  // if (sid == 0) {
+  //   printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]);
+  //   printf("rc = %e %e %e\n",rc[0],rc[1],rc[2]);
+  // }
   
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
   Uc = 4.0*ri6*(ri6 - 1.0);
   Duc = -48.0*ri6*(ri6 - 0.5)/r1;
-  
+
   /* Reset the potential & forces */
-  for(it_atom = s.systemAtoms.begin(); it_atom != cell.atoms.end(); ++it_atom) {
+  lpe = 0.0;
+  for(auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     it_atom->ax = 0.0;
     it_atom->ay = 0.0;
-    it_atom->az = 0.0;
+    it_atom->az = 0.0;  
   }
 
   /* Make a linked-cell list, lscl------------------------------------*/
@@ -576,7 +595,6 @@ the residents.
     head[c] = i;
   } /* Endfor atom i */
 
-
   /* Calculate pair interaction---------------------------------------*/
 
   rrCut = RCUT*RCUT;
@@ -589,7 +607,7 @@ the residents.
     /* Calculate a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
     /* Skip this cell if empty */
-    if (head[c] == -1) continue;
+    if (head[c] == EMPTY) continue;
 
     /* Scan the neighbor cells (including itself) of cell c */
     for (mc1[0]=mc[0]-1; mc1[0]<=mc[0]+1; (mc1[0])++)
@@ -599,15 +617,15 @@ the residents.
       /* Calculate the scalar cell index of the neighbor cell */
       c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
       /* Skip this neighbor cell if empty */
-      if (head[c1] == -1) continue;
+      if (head[c1] == EMPTY) continue;
 
       /* Scan atom i in cell c */
       i = head[c];
-      while (i != -1) {
+      while (i != EMPTY) {
 
         /* Scan atom j in cell c1 */
         j = head[c1];
-        while (j != -1) {
+        while (j != EMPTY) {
 
           /* No calculation with itself */
           if (j != i) {
@@ -648,31 +666,4 @@ the residents.
 
   /* Global potential energy */
   MPI_Allreduce(&lpe,&potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-}
-
-/*--------------------------------------------------------------------*/
-void eval_props() {
-/*----------------------------------------------------------------------
-Evaluates physical properties: kinetic, potential & total energies.
-----------------------------------------------------------------------*/
-  double vv,lke;
-  int i,a;
-
-  /* Total kinetic energy */
-  for (lke=0.0, i=0; i<n; i++) {
-    for (vv=0.0, a=0; a<3; a++) vv += rv[i][a]*rv[i][a];
-    lke += vv;
-  }
-  lke *= 0.5;
-  MPI_Allreduce(&lke,&kinEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-
-  /* Energy paer atom */
-  kinEnergy /= nglob;
-  potEnergy /= nglob;
-  totEnergy = kinEnergy + potEnergy;
-  temperature = kinEnergy*2.0/3.0;
-
-  /* Print the computed properties */
-  if (sid == 0) printf("%9.6f %9.6f %9.6f %9.6f\n",
-                stepCount*DeltaT,temperature,potEnergy,totEnergy);
 }
