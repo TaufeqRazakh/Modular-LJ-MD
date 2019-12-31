@@ -10,6 +10,7 @@ systems using the Message Passing Interface (MPI) standard.
 #include <array>
 #include <random>
 #include "mpi.h"
+#include "pmd.hpp"
 
 const double ARmass = 39.94800000; //A.U.s
 const double ARsigma = 3.40500000; // Angstroms
@@ -160,6 +161,15 @@ public:
 	myparity[a] = 0;
       else
 	myparity[a] = 1;
+    }
+  }
+
+  // Update Atomic co-ordinates to r(t+Dt)
+  void Update(double DeltaT) {
+    for(auto & atom : atoms) {
+      atom.x += DeltaT*atom.vx;
+      atom.y += DeltaT*atom.vz;
+      atom.z += DeltaT*atom.vy;
     }
   }
 
@@ -468,14 +478,15 @@ public:
 /*--------------------------------------------------------------------*/
 int main(int argc, char **argv) {
 /*--------------------------------------------------------------------*/
-  double cpu1;
+  // cpu - Elapsed wall clock time in seconds
+  double cpu,cpu1;
 
   int sid; // Sequential processor ID
   MPI_Init(&argc,&argv); /* Initialize the MPI environment */
   MPI_Comm_rank(MPI_COMM_WORLD, &sid);  /* My processor ID */
 
   // vproc - number of processrs in x|y|z directions
-  // Initucell - Number of unit cells per processor 
+  // Initucell - Number of unit cells per processor
   // Density - Density of atoms
   // InitTemp - Starting temperature
   // DeltaT - Size of time step
@@ -484,7 +495,7 @@ int main(int argc, char **argv) {
   array<int, 3> vproc, InitUcell;
   double Density, InitTemp, DeltaT;
   int StepLimit, StepAvg;
-  
+
   /* Read control parameters */
   ifstream ifs("pmd.in", ifstream::in);
   if(!ifs.is_open()) {
@@ -502,13 +513,13 @@ int main(int argc, char **argv) {
   // set_topology(); This is now implemented in the Cell object. Each cell makes its neighbor tables
   // init_conf(); This is now implemented within the Cell constructor
 
-  SubSystem subsystem;
+  SubSystem subsystem(vproc, InitUcell, InitTemp, Density);
   subsystem.AtomCopy();
-  ComputeAccel(subsystem, DeltaT);
-  
+  ComputeAccel(subsystem);
+
   cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    SingleStep(subsystem); 
+    SingleStep(subsystem);
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
   cpu = MPI_Wtime() - cpu1;
@@ -527,8 +538,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
 
   double DeltaTH = DeltaT / 2.0;
   subsystem.Kick(DeltaTH); /* First half kick to obtain v(t+Dt/2) */
-  for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
-    for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
+  subsystem.Update(DeltaT);
   subsystem.AtomMove();
   subsystem.AtomCopy();
   ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
@@ -546,14 +556,13 @@ the residents.
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
 
-  double rr,ri2,ri6,r1;
   double Uc, Duc;
 
   array<int, 3> lc{}, rc{};
   /* Compute the # of cells for linked cell lists */
   for (a=0; a<3; a++) {
-    lc[a] = al[a]/RCUT; 
-    rc[a] = al[a]/lc[a];
+    lc[a] = subsystem.al[a]/RCUT; 
+    rc[a] = subsystem.al[a]/lc[a];
   }
   // if (sid == 0) {
   //   printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]);

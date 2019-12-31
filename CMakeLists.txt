@@ -16,7 +16,7 @@ if(MPI_COMPILE_FLAGS)
             COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
 endif()
 
-if(MPI_LINK_FLAGS)
-    set_target_properties(Molecular-MD PROPERTIES
-            LINK_FLAGS "${MPI_LINK_FLAGS}")
-endif()
+#if(MPI_LINK_FLAGS)
+#    set_target_properties(Molecular-MD PROPERTIES
+#            LINK_FLAGS "${MPI_LINK_FLAGS}")
+#endif()
