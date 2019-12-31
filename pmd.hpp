@@ -1,4 +1,4 @@
-Class Atom;
-Class SubSystem;
-void SingleStep(SubSystem);
-void ComputeAccel(SubSystem);
+class Atom;
+class SubSystem;
+void SingleStep(SubSystem&, double);
+void ComputeAccel(SubSystem&);

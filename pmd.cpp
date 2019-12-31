@@ -75,7 +75,7 @@ public:
 
     /* Compute basic parameters */
     for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
-    if (pid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
+    if (pid == 0) cout << "al = " << al[0] << al[1] << al[2];
   
     // Prepare the Neighbot-node table
     InitNeighborNode(vproc);
@@ -418,7 +418,8 @@ public:
 	return al[1]-RCUT < atom.y;
       if (kd == 2)
 	return al[2]-RCUT < atom.z;
-    } 
+    }
+    return 0; // default return
   }
 
   // Return true if an Atom lies in them boundary to a neighbor ID
@@ -442,7 +443,8 @@ public:
 	return al[1] < atom.y;
       if (kd == 2)
 	return al[2] < atom.z;
-    } 
+    }
+    return 0;
   }
 
   /*--------------------------------------------------------------------*/
@@ -519,11 +521,11 @@ int main(int argc, char **argv) {
 
   cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    SingleStep(subsystem);
+    SingleStep(subsystem, DeltaT);
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
   cpu = MPI_Wtime() - cpu1;
-  if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,comt);
+  if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,subsystem.comt);
 
   MPI_Finalize(); /* Clean up the MPI environment */
   return 0;
@@ -555,6 +557,7 @@ the residents.
   int i,j,a,lc2[3],lcyz2,lcxyz2,mc[3],c,mc1[3],c1;
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
+  vector<Atom>::iterator it_atom;
 
   double Uc, Duc;
 
@@ -588,13 +591,18 @@ the residents.
   lcyz2 = lc2[1]*lc2[2];
   lcxyz2 = lc2[0]*lcyz2;
 
+  vector<int> head(lcxyz2);
+  int EMPTY = -1;
+  vector<int> lscl(subsystem.atoms.size());
   /* Reset the headers, head */
-  for (c=0; c<lcxyz2; c++) head[c] = EMPTY;
+  fill(head.begin(), head.end(), EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
 
-  for (i=0; i<n+nb; i++) {
-    for (a=0; a<3; a++) mc[a] = (r[i][a]+rc[a])/rc[a];
+       for (i=0, it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); i++, ++it_atom) {
+	 mc[0] = (it_atom->x + rc[0]) / rc[0];
+	 mc[0] = (it_atom->y + rc[1]) / rc[1];
+	 mc[0] = (it_atom->z + rc[2]) / rc[2];
 
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
@@ -641,13 +649,15 @@ the residents.
           /* No calculation with itself */
           if (j != i) {
             /* Logical flag: intra(true)- or inter(false)-pair atom */
-            bintra = (j < n);
+            bintra = (j < subsystem.n);
 
             /* Pair vector dr = r[i] - r[j] */
-            for (rr=0.0, a=0; a<3; a++) {
-              dr[a] = r[i][a]-r[j][a];
-              rr += dr[a]*dr[a];
-            }
+	    dr[0] = subsystem.atoms[i].x - subsystem.atoms[j].x;
+	    dr[1] = subsystem.atoms[i].y - subsystem.atoms[j].y;
+	    dr[2] = subsystem.atoms[i].z - subsystem.atoms[j].z;
+            for (rr=0.0, a=0; a<3; a++)
+	      rr += dr[a]*dr[a];
+            
 
             /* Calculate potential & forces for intranode pairs (i < j)
                & all the internode pairs if rij < RCUT; note that for
@@ -657,11 +667,19 @@ the residents.
               fcVal = 48.0*ri2*ri6*(ri6-0.5) + Duc/r1;
               vVal = 4.0*ri6*(ri6-1.0) - Uc - Duc*(r1-RCUT);
               if (bintra) lpe += vVal; else lpe += 0.5*vVal;
-              for (a=0; a<3; a++) {
-                f = fcVal*dr[a];
-                ra[i][a] += f;
-                if (bintra) ra[j][a] -= f;
-              }
+
+	      f = fcVal*dr[0];
+	      subsystem.atoms[j].x += f;
+	      if(bintra) subsystem.atoms[i].x -= f;
+	      
+	      f = fcVal*dr[1];
+	      subsystem.atoms[j].y += f;
+	      if(bintra) subsystem.atoms[i].y -= f;
+	      
+	      f = fcVal*dr[0];
+	      subsystem.atoms[j].z += f;
+	      if(bintra) subsystem.atoms[i].z -= f;
+	                   
             }
           } /* Endif not self */
           
@@ -676,5 +694,5 @@ the residents.
   } /* Endfor central cell, c */
 
   /* Global potential energy */
-  MPI_Allreduce(&lpe,&potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
+  MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);  
 }
