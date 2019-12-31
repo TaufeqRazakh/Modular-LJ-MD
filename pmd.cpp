@@ -61,7 +61,7 @@ public:
   int nglob; // Total number of atoms summed over processors
   double comt; // elapsed wall clock time & Communication time in second
 
-  double KinEnergy,potEnergy,totEnergy,temperature;
+  double kinEnergy,potEnergy,totEnergy,temperature;
   
   /* Create subsystem with parameters input parameters to calculate 
      the number of atoms and give them random velocities */
@@ -440,14 +440,16 @@ public:
     /*----------------------------------------------------------------------
       Evaluates physical properties: kinetic, potential & total energies.
       ----------------------------------------------------------------------*/
-    double vv,lke;
+    double vv=0,lke=0;
     int i,a;
 
     /* Total kinetic energy */
-    for (lke=0.0, i=0; i<n; i++) {
-      for (vv=0.0, a=0; a<3; a++) vv += rv[i][a]*rv[i][a];
-      lke += vv;
+    for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
+        vv += (it_atom->vx*it_atom->vx + it_atom->vy*it_atom->vy + it_atom->vz*it_atom->vz);
+        lke += vv;
+
     }
+
     lke *= 0.5;
     MPI_Allreduce(&lke,&kinEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 
@@ -505,7 +507,7 @@ int main(int argc, char **argv) {
   ComputeAccel(subsystem, DeltaT);
   
   cpu1 = MPI_Wtime();
-  for (stepCount=1; stepCount<=StepLimit; stepCount++) {
+  for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
     SingleStep(subsystem); 
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
