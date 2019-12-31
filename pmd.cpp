@@ -49,20 +49,20 @@ public:
 class SubSystem {
 public:
 
-  int pid; //sequential processor ID of this cell
+  int pid{}; //sequential processor ID of this cell
 
-  array<int, 3> al; // Box length per processor
-  array<int, 3> vid; /* Vector index of this processor */
-  array<int, 3> myparity; // Parity of this processor
-  array<int, 6> nn; // Neighbor node list of this processor
+  array<int, 3> al{}; // Box length per processor
+  array<int, 3> vid{}; /* Vector index of this processor */
+  array<int, 3> myparity{}; // Parity of this processor
+  array<int, 6> nn{}; // Neighbor node list of this processor
   vector<vector<double> > sv; // Shift vector to the 6 neighbors
-  array<double, 3> vSum, gvSum;
+  array<double, 3> vSum{}, gvSum{};
   vector<Atom> atoms;
   int n; // Number of resident atoms in this processor
-  int nglob; // Total number of atoms summed over processors
-  double comt; // elapsed wall clock time & Communication time in second
+  int nglob{}; // Total number of atoms summed over processors
+  double comt{}; // elapsed wall clock time & Communication time in second
 
-  double kinEnergy,potEnergy,totEnergy,temperature;
+  double kinEnergy{},potEnergy{},totEnergy{},temperature{};
   
   /* Create subsystem with parameters input parameters to calculate 
      the number of atoms and give them random velocities */
@@ -81,7 +81,7 @@ public:
     InitNeighborNode(vproc);
 
     // Initialize lattice positions and assign random velocities
-    array<double, 3> c,gap;
+    array<double, 3> c{},gap{};
     int j,a,nX,nY,nZ;
 
     /* FCC atoms in the original unit cell */
@@ -150,7 +150,9 @@ public:
       /* Scalar neighbor ID, nn */
       nn[ku] = k1[0]*vproc[1]*vproc[2]+k1[1]*vproc[2]+k1[2];
       /* Shift vector, sv */
-      for (a=0; a<3; a++) sv[ku][a] = al[a]*iv[ku][a];
+      vector<double> svEntry;
+      for (a=0; a<3; a++) svEntry.push_back(al[a]*iv[ku][a]);
+      sv.push_back(svEntry);
     }
     
     // Set up node parity table
