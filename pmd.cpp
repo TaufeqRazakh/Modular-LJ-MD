@@ -1,3 +1,5 @@
+
+
 /*----------------------------------------------------------------------
 Program pmd.c performs parallel molecular-dynamics for Lennard-Jones 
 systems using the Message Passing Interface (MPI) standard.
@@ -11,11 +13,6 @@ systems using the Message Passing Interface (MPI) standard.
 #include <random>
 #include "mpi.h"
 #include "pmd.hpp"
-
-const double ARmass = 39.94800000; //A.U.s
-const double ARsigma = 3.40500000; // Angstroms
-const double AReps   = 119.800000; // Kelvins
-const double CellDim = 12.0000000; // Angstroms
 
 const double RCUT = 2.5; // Potential cut-off length
 
@@ -48,25 +45,23 @@ public:
 
 class SubSystem {
 public:
-
-  int pid{}; //sequential processor ID of this cell
-
-  array<int, 3> al{}; // Box length per processor
-  array<int, 3> vid{}; /* Vector index of this processor */
-  array<int, 3> myparity{}; // Parity of this processor
-  array<int, 6> nn{}; // Neighbor node list of this processor
-  vector<vector<double> > sv; // Shift vector to the 6 neighbors
-  array<double, 3> vSum{}, gvSum{};
-  vector<Atom> atoms;
+  int pid; //sequential processor ID of this cell
   int n; // Number of resident atoms in this processor
-  int nglob{}; // Total number of atoms summed over processors
-  double comt{}; // elapsed wall clock time & Communication time in second
+  int nglob; // Total number of atoms summed over processors
+  double comt; // elapsed wall clock time & Communication time in second
+  array<double, 3> al; // Box length per processor
+  array<int, 3> vid; /* Vector index of this processor */
+  array<int, 3> myparity; // Parity of this processor
+  array<int, 6> nn; // Neighbor node list of this processor
+  vector<vector<double> > sv; // Shift vector to the 6 neighbors
+  array<double, 3> vSum, gvSum;
+  vector<Atom> atoms;
 
-  double kinEnergy{},potEnergy{},totEnergy{},temperature{};
+  double kinEnergy,potEnergy,totEnergy,temperature;
   
   /* Create subsystem with parameters input parameters to calculate 
      the number of atoms and give them random velocities */
-  SubSystem(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density) {
+  SubSystem(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density): pid(0), n(0), nglob(0), comt(0.0), al{}, vid{}, myparity{}, nn{}, sv{}, vSum{}, gvSum{}, atoms{}, kinEnergy(0.0), potEnergy(0.0), totEnergy(0.0), temperature(0) {
 
     MPI_Comm_rank(MPI_COMM_WORLD, &pid);
 
@@ -75,8 +70,8 @@ public:
 
     /* Compute basic parameters */
     for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
-    if (pid == 0) cout << "al = " << al[0] << al[1] << al[2];
-  
+    if (pid == 0) cout << "al = " << al[0] << " " << al[1] <<  " " << al[2] << endl;
+
     // Prepare the Neighbot-node table
     InitNeighborNode(vproc);
 
@@ -87,7 +82,7 @@ public:
     /* FCC atoms in the original unit cell */
     vector<vector<double> > origAtom = {{0.0, 0.0, 0.0}, {0.0, 0.5, 0.5},
 					{0.5, 0.0, 0.5}, {0.5, 0.5, 0.0}};
-    
+
     /* Set up a face-centered cubic (fcc) lattice */
     for (a=0; a<3; a++) gap[a] = al[a]/InitUcell[a];
 
@@ -118,9 +113,11 @@ public:
     n = atoms.size();
 
     MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    
+    if(pid == 0) cout << "nglob = " << nglob << endl;
+
+    nglob = 0;
     MPI_Allreduce(&vSum[0],&gvSum[0],3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-    
+
     // Make the total momentum zero
     for (a=0; a<3; a++) gvSum[a] /= nglob;
     for(auto & atom : atoms) {
@@ -190,8 +187,6 @@ public:
     int nbnew = 0; /* # of "received" boundary atoms */
     double com1;
 
-    vector<vector<Atom> > lsb; // atom to be send to the
-
     // Iterate through neighbour nodes
     for( auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
       // Iterate through all atoms in this cell
@@ -213,14 +208,15 @@ public:
       if(distance(nn.begin(), it_neighbor) < 2)
 	kd = 0;
       else if(distance(nn.begin(), it_neighbor) < 4)
-	kd =1;
+	kd = 1;
       else
-	kd =2;
+	kd = 2;
       
       com1=MPI_Wtime(); /* To calculate the communication time */
 
+      inode = *it_neighbor;
       nsd = sendBuf.size(); /* # of atoms to be sent */
-      
+
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
 	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
@@ -243,19 +239,19 @@ public:
       
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
-	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+      	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+      		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       }
       /* Odd node: recv & send */
       else if (myparity[kd] == 1) {
-	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+      	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+      		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
       }
-	/* Single layer: Exchange information with myself */
+      	/* Single layer: Exchange information with myself */
       else
-	sendBuf.swap(recvBuf);
+      	sendBuf.swap(recvBuf);
 
       // Message storing
       for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
@@ -325,6 +321,7 @@ public:
       
       com1=MPI_Wtime(); /* To calculate the communication time */
 
+      inode = *it_neighbor;
       nsd = sendBuf.size(); /* # of atoms to be sent */
       
       /* Even node: send & recv */
@@ -349,15 +346,15 @@ public:
       
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
-	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
 		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       }
       /* Odd node: recv & send */
       else if (myparity[kd] == 1) {
-	MPI_Recv(&recvBuf[0],nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
 		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-	MPI_Send(&sendBuf[0],nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
       }
 	/* Single layer: Exchange information with myself */
       else
@@ -518,16 +515,23 @@ int main(int argc, char **argv) {
   // init_conf(); This is now implemented within the Cell constructor
 
   SubSystem subsystem(vproc, InitUcell, InitTemp, Density);
+  if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
+  //   cout << endl;
+  //   for(auto & v : subsystem.nn) {
+  //     cout << v << " ";
+  //   }
+  //   cout << endl;
+  // }
   subsystem.AtomCopy();
   ComputeAccel(subsystem);
 
-  cpu1 = MPI_Wtime();
+   cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
     SingleStep(subsystem, DeltaT);
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
   cpu = MPI_Wtime() - cpu1;
-  if (sid == 0) printf("CPU & COMT = %le %le\n",cpu,subsystem.comt);
+  if (sid == 0) cout << "CPU & COMT = " << cpu << " " << subsystem.comt << endl;
 
   MPI_Finalize(); /* Clean up the MPI environment */
   return 0;
@@ -538,14 +542,12 @@ void SingleStep(SubSystem &subsystem, double DeltaT) {
 /*----------------------------------------------------------------------
 r & rv are propagated by DeltaT using the velocity-Verlet scheme.
 ----------------------------------------------------------------------*/
-  int i,a;
-
   double DeltaTH = DeltaT / 2.0;
   subsystem.Kick(DeltaTH); /* First half kick to obtain v(t+Dt/2) */
   subsystem.Update(DeltaT);
   subsystem.AtomMove();
   subsystem.AtomCopy();
-  ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
+  // ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
   subsystem.Kick(DeltaTH); /* Second half kick to obtain v(t+Dt) */
 }
 
@@ -563,16 +565,17 @@ the residents.
 
   double Uc, Duc;
 
-  array<int, 3> lc{}, rc{};
+  array<int, 3> lc{};
+  array<double, 3> rc{};
   /* Compute the # of cells for linked cell lists */
   for (a=0; a<3; a++) {
     lc[a] = subsystem.al[a]/RCUT; 
     rc[a] = subsystem.al[a]/lc[a];
   }
-  // if (sid == 0) {
-  //   printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]);
-  //   printf("rc = %e %e %e\n",rc[0],rc[1],rc[2]);
-  // }
+  if (subsystem.pid == 0) {
+    cout << "lc = " << lc[0] << " " << lc[1] << " " << lc[2] << endl;
+    cout << "rc = " << rc[0] << " " << rc[1] << " " << rc[2] << endl;
+  }
   
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);

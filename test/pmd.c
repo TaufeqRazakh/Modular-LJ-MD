@@ -56,7 +56,7 @@ Initializes parameters.
   /* Compute basic parameters */
   DeltaTH = 0.5*DeltaT;
   for (a=0; a<3; a++) al[a] = InitUcell[a]/pow(Density/4.0,1.0/3.0);
-   printf("al = %d %e %e %e\n",sid, al[0],al[1],al[2]);
+  if (sid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
 
   /* Compute the # of cells for linked cell lists */
   for (a=0; a<3; a++) {
@@ -94,6 +94,10 @@ prepares the node parity table, myparity.
       k1[a] = (vid[a]+iv[ku][a]+vproc[a])%vproc[a];
     /* Scalar neighbor ID, nn */
     nn[ku] = k1[0]*vproc[1]*vproc[2]+k1[1]*vproc[2]+k1[2];
+    /* if(sid ==0){ */
+    /*   printf("%d ",nn[ku]); */
+    /* } */
+
     /* Shift vector, sv */
     for (a=0; a<3; a++) sv[ku][a] = al[a]*iv[ku][a];
   }
@@ -172,7 +176,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  atom_move();
+  //atom_move();
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
