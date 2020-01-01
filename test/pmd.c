@@ -327,7 +327,6 @@ the residents.
 
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
-
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
     lscl[i] = head[c];
 

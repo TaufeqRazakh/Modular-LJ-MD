@@ -113,9 +113,7 @@ public:
     n = atoms.size();
 
     MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    if(pid == 0) cout << "nglob = " << nglob << endl;
 
-    nglob = 0;
     MPI_Allreduce(&vSum[0],&gvSum[0],3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 
     // Make the total momentum zero
@@ -464,7 +462,7 @@ public:
     lke *= 0.5;
     MPI_Allreduce(&lke,&kinEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 
-    /* Energy paer atom */
+    /* Energy per atom */
     kinEnergy /= nglob;
     potEnergy /= nglob;
     totEnergy = kinEnergy + potEnergy;
@@ -547,7 +545,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   subsystem.Update(DeltaT);
   subsystem.AtomMove();
   subsystem.AtomCopy();
-  // ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
+  ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
   subsystem.Kick(DeltaTH); /* Second half kick to obtain v(t+Dt) */
 }
 
@@ -587,7 +585,7 @@ the residents.
   for(auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     it_atom->ax = 0.0;
     it_atom->ay = 0.0;
-    it_atom->az = 0.0;  
+    it_atom->az = 0.0;
   }
 
   /* Make a linked-cell list, lscl------------------------------------*/
@@ -606,12 +604,11 @@ the residents.
 
        for (i=0, it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); i++, ++it_atom) {
 	 mc[0] = (it_atom->x + rc[0]) / rc[0];
-	 mc[0] = (it_atom->y + rc[1]) / rc[1];
-	 mc[0] = (it_atom->z + rc[2]) / rc[2];
+	 mc[1] = (it_atom->y + rc[1]) / rc[1];
+	 mc[2] = (it_atom->z + rc[2]) / rc[2];
 
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
-
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
     lscl[i] = head[c];
 
