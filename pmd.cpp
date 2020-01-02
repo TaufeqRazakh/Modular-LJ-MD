@@ -499,8 +499,7 @@ public:
     temperature = kinEnergy*2.0/3.0;
 
     /* Print the computed properties */
-    if (pid == 0) printf("%9.6f %9.6f %9.6f %9.6f\n",
-			 stepCount*DeltaT,temperature,potEnergy,totEnergy);
+    if (pid == 0) cout << stepCount*DeltaT << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;;
   }
 };
 
@@ -555,7 +554,7 @@ int main(int argc, char **argv) {
 
    cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
+    // if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
     SingleStep(subsystem, DeltaT);    
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
@@ -605,10 +604,10 @@ void ComputeAccel(SubSystem &subsystem) {
     lc[a] = subsystem.al[a]/RCUT; 
     rc[a] = subsystem.al[a]/lc[a];
   }
-  if (subsystem.pid == 0) {
-    cout << "lc = " << lc[0] << " " << lc[1] << " " << lc[2] << endl;
-    cout << "rc = " << rc[0] << " " << rc[1] << " " << rc[2] << endl;
-  }
+  // if (subsystem.pid == 0) {
+  //   cout << "lc = " << lc[0] << " " << lc[1] << " " << lc[2] << endl;
+  //   cout << "rc = " << rc[0] << " " << rc[1] << " " << rc[2] << endl;
+  // }
   
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
@@ -667,7 +666,7 @@ void ComputeAccel(SubSystem &subsystem) {
 	/* Calculate a scalar cell index */
 	c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
 	/* Skip this cell if empty */
-	if (head[c] == EMPTY) continue;
+	if (head.find(c) == head.end()) continue;
 
 	/* Scan the neighbor cells (including itself) of cell c */
 	for (mc1[0]=mc[0]-1; mc1[0]<=mc[0]+1; (mc1[0])++)
@@ -677,7 +676,7 @@ void ComputeAccel(SubSystem &subsystem) {
 	      /* Calculate the scalar cell index of the neighbor cell */
 	      c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
 	      /* Skip this neighbor cell if empty */
-	      if (head[c1] == EMPTY) continue;
+	      if (head.find(c1) == head.end()) continue;
 
 	      /* Scan atom i in cell c */
 	      i = head[c];
