@@ -94,10 +94,6 @@ prepares the node parity table, myparity.
       k1[a] = (vid[a]+iv[ku][a]+vproc[a])%vproc[a];
     /* Scalar neighbor ID, nn */
     nn[ku] = k1[0]*vproc[1]*vproc[2]+k1[1]*vproc[2]+k1[2];
-    /* if(sid ==0){ */
-    /*   printf("%d ",nn[ku]); */
-    /* } */
-
     /* Shift vector, sv */
     for (a=0; a<3; a++) sv[ku][a] = al[a]*iv[ku][a];
   }
@@ -176,7 +172,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  //atom_move();
+  atom_move();
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
@@ -327,6 +323,7 @@ the residents.
 
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
+
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
     lscl[i] = head[c];
 

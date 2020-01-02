@@ -1,19 +1,20 @@
-
-
 /*----------------------------------------------------------------------
-Program pmd.c performs parallel molecular-dynamics for Lennard-Jones 
+Program pmd.cpp performs parallel molecular-dynamics for Lennard-Jones
 systems using the Message Passing Interface (MPI) standard.
 ----------------------------------------------------------------------*/
 #include <iostream>
-#include <cstdlib>
 #include <cmath>
 #include <fstream>      // std::fstream
 #include <vector>
 #include <array>
-#include <random>
 #include <algorithm>
+#include <map>
 #include "mpi.h"
 #include "pmd.hpp"
+
+/* Constants for the random number generator */
+#define D2P31M 2147483647.0
+#define DMUL 16807.0
 
 const double RCUT = 2.5; // Potential cut-off length
 
@@ -66,9 +67,6 @@ public:
 
     pid = sid;
 
-    default_random_engine generator;
-    normal_distribution<double> distribution(1,1);
-
     /* Compute basic parameters */
     for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
     if (pid == 0) cout << "al = " << al[0] << " " << al[1] <<  " " << al[2] << endl;
@@ -95,26 +93,36 @@ public:
 	  c[0] = nX*gap[0];
 	  for (j=0; j<4; j++) {
 	    Atom atom;
-	    atom.x = c[0] + gap[0]*origAtom[j][0];
-	    atom.vx = sqrt(3*InitTemp)*distribution(generator);
-	    atom.y = c[1] + gap[1]*origAtom[j][1];
-	    atom.vy = sqrt(3*InitTemp)*distribution(generator);
-	    atom.z = c[2] + gap[2]*origAtom[j][2];
-	    atom.vz = sqrt(3*InitTemp)*drand48();
-	    atoms.push_back(atom);
 
-	    vSum[0] += atom.vx;
-	    vSum[1] += atom.vy;
-	    vSum[2] += atom.vz;
+	    atom.x = c[0] + gap[0]*origAtom[j][0];
+
+	    atom.y = c[1] + gap[1]*origAtom[j][1];
+
+	    atom.z = c[2] + gap[2]*origAtom[j][2];
+
+	    atoms.push_back(atom);	    
 	  }
 	}
       }
     }
-
+    /* Total # of atoms summed over processors */
     n = atoms.size();
-
     MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
+    /* Generate random velocities */
+    double  seed = 13597.0+sid;
+    double vMag = sqrt(3*InitTemp);
+    double e[3];
+    for(a=0; a<3; a++) vSum[a] = 0.0;
+    for(auto & atom : atoms) {
+      RandVec3(e,&seed);
+      atom.vx = vMag*e[0];
+      vSum[0] += atom.vx;
+      atom.vy = vMag*e[1];
+      vSum[1] += atom.vy;
+      atom.vz = vMag*e[2];
+      vSum[2] += atom.vz;
+    }
     MPI_Allreduce(&vSum[0],&gvSum[0],3,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 
     // Make the total momentum zero
@@ -184,20 +192,19 @@ public:
   void AtomCopy() {
     int kd,kdd,i,ku,inode,nsd,nrc,a;
     int nbnew = 0; /* # of "received" boundary atoms */
-    double com1;
+    double com1 = 0;
 
     // Iterate through neighbour nodes
     for( auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
       // Iterate through all atoms in this cell
       vector<double> sendBuf;
       vector<double> recvBuf;
-      for( auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
-	if(bbd(*it_atom, *it_neighbor)) {
-	  sendBuf.push_back(it_atom->type);
-	  sendBuf.push_back(it_atom->x);
-	  sendBuf.push_back(it_atom->y);
-	  sendBuf.push_back(it_atom->z);
-	  it_atom->isResident = false;
+      for(auto & atom : atoms) {
+	if(bbd(atom, *it_neighbor)) {
+	  sendBuf.push_back(atom.type);
+	  sendBuf.push_back(atom.x);
+	  sendBuf.push_back(atom.y);
+	  sendBuf.push_back(atom.z);
 	}
       }      
       
@@ -214,6 +221,7 @@ public:
       com1=MPI_Wtime(); /* To calculate the communication time */
 
       inode = *it_neighbor;
+      //cout << "inode = " << inode << endl;
       nsd = sendBuf.size(); /* # of atoms to be sent */
 
       /* Even node: send & recv */
@@ -255,14 +263,18 @@ public:
       // Message storing
       for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
 	Atom rAtom;
-	
+
+	//if(pid == 0) cout << "type: " << *it_recv;
 	rAtom.type = *it_recv;
 	++it_recv;
-	rAtom.isResident = true;
+	rAtom.isResident = false;
+	//if(pid == 0) cout << " x: " << *it_recv;
 	rAtom.x = *it_recv;
 	++it_recv;
+	//if(pid == 0) cout << " y: " << *it_recv;
 	rAtom.y = *it_recv;
 	++it_recv;
+	//if(pid == 0) cout << " z: " << *it_recv << endl;
 	rAtom.z = *it_recv;
 
 	atoms.push_back(rAtom);       
@@ -283,7 +295,7 @@ public:
   void AtomMove() {
     int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
     int newim = 0; /* # of new immigrants */
-    double com1;
+    double com1 = 0;
 
     // Neglect the atoms in them cell that have entered throgh AtomCopy()
     atoms.resize(n);
@@ -293,18 +305,18 @@ public:
       // Iterate through all atoms in this cell
       vector<double> sendBuf;
       vector<double> recvBuf;
-      for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
-	if(bmv(*it_atom, *it_neighbor)) {
-	  sendBuf.push_back(it_atom->type);
-	  sendBuf.push_back(it_atom->x);
-	  sendBuf.push_back(it_atom->y);
-	  sendBuf.push_back(it_atom->z);
+      for(auto & atom : atoms) {
+	if(bmv(atom, *it_neighbor)) {
+	  sendBuf.push_back(atom.type);
+	  sendBuf.push_back(atom.x);
+	  sendBuf.push_back(atom.y);
+	  sendBuf.push_back(atom.z);
 	  // In AtomMove we will also be considering the velocities
-	  sendBuf.push_back(it_atom->vx);
-	  sendBuf.push_back(it_atom->vy);
-	  sendBuf.push_back(it_atom->vz);
+	  sendBuf.push_back(atom.vx);
+	  sendBuf.push_back(atom.vy);
+	  sendBuf.push_back(atom.vz);
 	  
-	  it_atom->isResident = false;
+	  atom.isResident = false;
 	}
       }      
       
@@ -445,6 +457,23 @@ public:
     return 0;
   }
 
+    static double Dmod(double a, double b) {
+    int n;
+        n = (int) (a / b);
+    return (a - b * n);
+  }
+  static double RandR(double *seed) {
+    *seed = Dmod(*seed*DMUL,D2P31M);
+    return (*seed/D2P31M);
+  }
+  static void RandVec3(double *p, double *seed) {
+    double x = 0, y = 0,s = 2.0;
+    while (s > 1.0) {
+      x = 2.0*RandR(seed) - 1.0; y = 2.0*RandR(seed) - 1.0; s = x*x + y*y;
+    }
+    p[2] = 1.0 - 2.0*s; s = 2.0*sqrt(1.0 - s); p[0] = s*x; p[1] = s*y;
+  }
+
   /*--------------------------------------------------------------------*/
   void EvalProps(int stepCount, double DeltaT) {
     /*----------------------------------------------------------------------
@@ -454,8 +483,8 @@ public:
     int i,a;
 
     /* Total kinetic energy */
-    for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom) {
-        vv += (it_atom->vx*it_atom->vx + it_atom->vy*it_atom->vy + it_atom->vz*it_atom->vz);
+    for(auto & atom : atoms) {
+        vv += (atom.vx*atom.vx + atom.vy*atom.vy + atom.vz*atom.vz);
         lke += vv;
 
     }
@@ -492,7 +521,7 @@ int main(int argc, char **argv) {
   // DeltaT - Size of time step
   // StepLimit - Number of time steps to be simulated
   // StepAvg - Reporting interval forces statistical data
-  array<int, 3> vproc, InitUcell;
+  array<int, 3> vproc{}, InitUcell{};
   double Density, InitTemp, DeltaT;
   int StepLimit, StepAvg;
 
@@ -553,22 +582,21 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
 
 /*--------------------------------------------------------------------*/
 void ComputeAccel(SubSystem &subsystem) {
-/*----------------------------------------------------------------------
-Given atomic coordinates, r[0:n+nb-1][], for the extended (i.e., 
-resident & copied) system, computes the acceleration, ra[0:n-1][], for 
-the residents.
-----------------------------------------------------------------------*/
+  /*----------------------------------------------------------------------
+    Given atomic coordinates, r[0:n+nb-1][], for the extended (i.e., 
+    resident & copied) system, computes the acceleration, ra[0:n-1][], for 
+    the residents.
+    ----------------------------------------------------------------------*/
   int i,j,a,lc2[3],lcyz2,lcxyz2,mc[3],c,mc1[3],c1;
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
-  vector<Atom>::iterator it_atom;
 
   double Uc, Duc;
 
   array<int, 3> lc{};
   array<double, 3> rc{};
 
-  vector<int> head;
+  //vector<int> head;
   vector<int> lscl (subsystem.atoms.size());
   int EMPTY = -1;
   
@@ -589,10 +617,10 @@ the residents.
 
   /* Reset the potential & forces */
   lpe = 0.0;
-  for(auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
-    it_atom->ax = 0.0;
-    it_atom->ay = 0.0;
-    it_atom->az = 0.0;
+  for(auto & atom : subsystem.atoms) {
+    atom.ax = 0.0;
+    atom.ay = 0.0;
+    atom.az = 0.0;
   }
 
   /* Make a linked-cell list, lscl------------------------------------*/
@@ -601,24 +629,31 @@ the residents.
   lcyz2 = lc2[1]*lc2[2];
   lcxyz2 = lc2[0]*lcyz2;
 
+  map<int, int> head;
   /* Reset the headers, head */
-  for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
+  //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  for (i=0; i < subsystem.atoms.size(); i++) {
-	 mc[0] = (subsystem.atoms[i].x + rc[0]) / rc[0];
-	 mc[1] = (subsystem.atoms[i].y + rc[1]) / rc[1];
-	 mc[2] = (subsystem.atoms[i].z + rc[2]) / rc[2];
+  for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
+    mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
+    mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
+    mc[2] = (int)(it_atom->z + rc[2]) / rc[2];
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
 
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
-    if(subsystem.pid == 0) cout << "before head size: " << head.size() << " c: "<< c << " i: " << i <<  " head[c]: " << head[c] << endl;
-     lscl[i] = head[c];
-     if(subsystem.pid == 0) cout <<"after head[c]: " << head[c] << endl;
-     //          continue;
+    //if(subsystem.pid == 0) cout << "before head size: " << head.size() << " c: "<< c << " i: " << i <<  " head[c]: " << head[c] << endl;
+    auto search = head.find(c);
+    if(search != head.end())
+      lscl[distance(subsystem.atoms.begin(), it_atom)] = search->second;
+    else
+      lscl[distance(subsystem.atoms.begin(), it_atom)] = EMPTY;
+    //if(subsystem.pid == 0) cout <<"after head[c]: " << head[c] << endl;
+    //continue;
     /* The last one goes to the header */
-    head[c] = i;
+    if(search != head.end())
+      head.erase(search);
+    head.insert(head.begin(), pair<int, int>(c,distance(subsystem.atoms.begin(), it_atom)));
     //if(subsystem.pid == 0) cout << "You have reached the loop end" << endl;
   } /* Endfor atom i */
 
@@ -627,76 +662,76 @@ the residents.
 
   /* Scan inner cells */
   for (mc[0]=1; mc[0]<=lc[0]; (mc[0])++)
-  for (mc[1]=1; mc[1]<=lc[1]; (mc[1])++)
-  for (mc[2]=1; mc[2]<=lc[2]; (mc[2])++) {
-    /* Calculate a scalar cell index */
-    c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
-    /* Skip this cell if empty */
-    if (head[c] == EMPTY) continue;
+    for (mc[1]=1; mc[1]<=lc[1]; (mc[1])++)
+      for (mc[2]=1; mc[2]<=lc[2]; (mc[2])++) {
+	/* Calculate a scalar cell index */
+	c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
+	/* Skip this cell if empty */
+	if (head[c] == EMPTY) continue;
 
-    /* Scan the neighbor cells (including itself) of cell c */
-    for (mc1[0]=mc[0]-1; mc1[0]<=mc[0]+1; (mc1[0])++)
-    for (mc1[1]=mc[1]-1; mc1[1]<=mc[1]+1; (mc1[1])++)
-    for (mc1[2]=mc[2]-1; mc1[2]<=mc[2]+1; (mc1[2])++) {
+	/* Scan the neighbor cells (including itself) of cell c */
+	for (mc1[0]=mc[0]-1; mc1[0]<=mc[0]+1; (mc1[0])++)
+	  for (mc1[1]=mc[1]-1; mc1[1]<=mc[1]+1; (mc1[1])++)
+	    for (mc1[2]=mc[2]-1; mc1[2]<=mc[2]+1; (mc1[2])++) {
 
-      /* Calculate the scalar cell index of the neighbor cell */
-      c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
-      /* Skip this neighbor cell if empty */
-      if (head[c1] == EMPTY) continue;
+	      /* Calculate the scalar cell index of the neighbor cell */
+	      c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
+	      /* Skip this neighbor cell if empty */
+	      if (head[c1] == EMPTY) continue;
 
-      /* Scan atom i in cell c */
-      i = head[c];
-      while (i != EMPTY) {
+	      /* Scan atom i in cell c */
+	      i = head[c];
+	      while (i != EMPTY) {
 
-        /* Scan atom j in cell c1 */
-        j = head[c1];
-        while (j != EMPTY) {
+		/* Scan atom j in cell c1 */
+		j = head[c1];
+		while (j != EMPTY) {
 
-          /* No calculation with itself */
-          if (j != i) {
-            /* Logical flag: intra(true)- or inter(false)-pair atom */
-            bintra = (j < subsystem.n);
+		  /* No calculation with itself */
+		  if (j != i) {
+		    /* Logical flag: intra(true)- or inter(false)-pair atom */
+		    bintra = (j < subsystem.n);
 
-            /* Pair vector dr = r[i] - r[j] */
-	    dr[0] = subsystem.atoms[i].x - subsystem.atoms[j].x;
-	    dr[1] = subsystem.atoms[i].y - subsystem.atoms[j].y;
-	    dr[2] = subsystem.atoms[i].z - subsystem.atoms[j].z;
-            for (rr=0.0, a=0; a<3; a++)
-	      rr += dr[a]*dr[a];	    
+		    /* Pair vector dr = r[i] - r[j] */
+		    dr[0] = subsystem.atoms[i].x - subsystem.atoms[j].x;
+		    dr[1] = subsystem.atoms[i].y - subsystem.atoms[j].y;
+		    dr[2] = subsystem.atoms[i].z - subsystem.atoms[j].z;
+		    for (rr=0.0, a=0; a<3; a++)
+		      rr += dr[a]*dr[a];	    
 
-            /* Calculate potential & forces for intranode pairs (i < j)
-               & all the internode pairs if rij < RCUT; note that for
-               any copied atom, i < j */
-            if (i<j && rr<rrCut) {
-              ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1 = sqrt(rr);
-              fcVal = 48.0*ri2*ri6*(ri6-0.5) + Duc/r1;
-              vVal = 4.0*ri6*(ri6-1.0) - Uc - Duc*(r1-RCUT);
-              if (bintra) lpe += vVal; else lpe += 0.5*vVal;
+		    /* Calculate potential & forces for intranode pairs (i < j)
+		       & all the internode pairs if rij < RCUT; note that for
+		       any copied atom, i < j */
+		    if (i<j && rr<rrCut) {
+		      ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1 = sqrt(rr);
+		      fcVal = 48.0*ri2*ri6*(ri6-0.5) + Duc/r1;
+		      vVal = 4.0*ri6*(ri6-1.0) - Uc - Duc*(r1-RCUT);
+		      if (bintra) lpe += vVal; else lpe += 0.5*vVal;
 
-	      f = fcVal*dr[0];
-	      subsystem.atoms[j].x += f;
-	      if(bintra) subsystem.atoms[i].x -= f;
+		      f = fcVal*dr[0];
+		      subsystem.atoms[j].x += f;
+		      if(bintra) subsystem.atoms[i].x -= f;
 	      
-	      f = fcVal*dr[1];
-	      subsystem.atoms[j].y += f;
-	      if(bintra) subsystem.atoms[i].y -= f;
+		      f = fcVal*dr[1];
+		      subsystem.atoms[j].y += f;
+		      if(bintra) subsystem.atoms[i].y -= f;
 	      
-	      f = fcVal*dr[0];
-	      subsystem.atoms[j].z += f;
-	      if(bintra) subsystem.atoms[i].z -= f;	                   
-            }
-          } /* Endif not self */
+		      f = fcVal*dr[0];
+		      subsystem.atoms[j].z += f;
+		      if(bintra) subsystem.atoms[i].z -= f;	                   
+		    }
+		  } /* Endif not self */
           
-          j = lscl[j];
-        } /* Endwhile j not empty */
+		  j = lscl[j];
+		} /* Endwhile j not empty */
 
-        i = lscl[i];
-      } /* Endwhile i not empty */
+		i = lscl[i];
+	      } /* Endwhile i not empty */
 
-    } /* Endfor neighbor cells, c1 */
+	    } /* Endfor neighbor cells, c1 */
 
-  } /* Endfor central cell, c */
+      } /* Endfor central cell, c */
 
   /* Global potential energy */
-  MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);  
+  MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
