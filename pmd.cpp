@@ -11,6 +11,7 @@ systems using the Message Passing Interface (MPI) standard.
 #include <vector>
 #include <array>
 #include <random>
+#include <algorithm>
 #include "mpi.h"
 #include "pmd.hpp"
 
@@ -61,9 +62,9 @@ public:
   
   /* Create subsystem with parameters input parameters to calculate 
      the number of atoms and give them random velocities */
-  SubSystem(array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density): pid(0), n(0), nglob(0), comt(0.0), al{}, vid{}, myparity{}, nn{}, sv{}, vSum{}, gvSum{}, atoms{}, kinEnergy(0.0), potEnergy(0.0), totEnergy(0.0), temperature(0) {
+  SubSystem(int sid, array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density): pid(0), n(0), nglob(0), comt(0.0), al{}, vid{}, myparity{}, nn{}, sv{}, vSum{}, gvSum{}, atoms{}, kinEnergy(0.0), potEnergy(0.0), totEnergy(0.0), temperature(0) {
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+    pid = sid;
 
     default_random_engine generator;
     normal_distribution<double> distribution(1,1);
@@ -512,7 +513,7 @@ int main(int argc, char **argv) {
   // set_topology(); This is now implemented in the Cell object. Each cell makes its neighbor tables
   // init_conf(); This is now implemented within the Cell constructor
 
-  SubSystem subsystem(vproc, InitUcell, InitTemp, Density);
+  SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
   //   cout << endl;
   //   for(auto & v : subsystem.nn) {
@@ -525,7 +526,8 @@ int main(int argc, char **argv) {
 
    cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    SingleStep(subsystem, DeltaT);
+    if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
+    SingleStep(subsystem, DeltaT);    
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
   cpu = MPI_Wtime() - cpu1;
@@ -565,6 +567,11 @@ the residents.
 
   array<int, 3> lc{};
   array<double, 3> rc{};
+
+  vector<int> head;
+  vector<int> lscl (subsystem.atoms.size());
+  int EMPTY = -1;
+  
   /* Compute the # of cells for linked cell lists */
   for (a=0; a<3; a++) {
     lc[a] = subsystem.al[a]/RCUT; 
@@ -594,37 +601,34 @@ the residents.
   lcyz2 = lc2[1]*lc2[2];
   lcxyz2 = lc2[0]*lcyz2;
 
-  vector<int> head(lcxyz2);
-  int EMPTY = -1;
-  vector<int> lscl(subsystem.atoms.size());
   /* Reset the headers, head */
-  fill(head.begin(), head.end(), EMPTY);
+  for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-
-       for (i=0, it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); i++, ++it_atom) {
-	 mc[0] = (it_atom->x + rc[0]) / rc[0];
-	 mc[1] = (it_atom->y + rc[1]) / rc[1];
-	 mc[2] = (it_atom->z + rc[2]) / rc[2];
-
+  for (i=0; i < subsystem.atoms.size(); i++) {
+	 mc[0] = (subsystem.atoms[i].x + rc[0]) / rc[0];
+	 mc[1] = (subsystem.atoms[i].y + rc[1]) / rc[1];
+	 mc[2] = (subsystem.atoms[i].z + rc[2]) / rc[2];
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
-    /* Link to the previous occupant (or EMPTY if you're the 1st) */
-    lscl[i] = head[c];
 
+    /* Link to the previous occupant (or EMPTY if you're the 1st) */
+    if(subsystem.pid == 0) cout << "before head size: " << head.size() << " c: "<< c << " i: " << i <<  " head[c]: " << head[c] << endl;
+     lscl[i] = head[c];
+     if(subsystem.pid == 0) cout <<"after head[c]: " << head[c] << endl;
+     //          continue;
     /* The last one goes to the header */
     head[c] = i;
+    //if(subsystem.pid == 0) cout << "You have reached the loop end" << endl;
   } /* Endfor atom i */
 
   /* Calculate pair interaction---------------------------------------*/
-
   rrCut = RCUT*RCUT;
 
   /* Scan inner cells */
   for (mc[0]=1; mc[0]<=lc[0]; (mc[0])++)
   for (mc[1]=1; mc[1]<=lc[1]; (mc[1])++)
   for (mc[2]=1; mc[2]<=lc[2]; (mc[2])++) {
-
     /* Calculate a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
     /* Skip this cell if empty */
@@ -658,8 +662,7 @@ the residents.
 	    dr[1] = subsystem.atoms[i].y - subsystem.atoms[j].y;
 	    dr[2] = subsystem.atoms[i].z - subsystem.atoms[j].z;
             for (rr=0.0, a=0; a<3; a++)
-	      rr += dr[a]*dr[a];
-            
+	      rr += dr[a]*dr[a];	    
 
             /* Calculate potential & forces for intranode pairs (i < j)
                & all the internode pairs if rij < RCUT; note that for
@@ -680,8 +683,7 @@ the residents.
 	      
 	      f = fcVal*dr[0];
 	      subsystem.atoms[j].z += f;
-	      if(bintra) subsystem.atoms[i].z -= f;
-	                   
+	      if(bintra) subsystem.atoms[i].z -= f;	                   
             }
           } /* Endif not self */
           
