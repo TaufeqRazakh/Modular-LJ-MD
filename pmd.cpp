@@ -484,11 +484,9 @@ public:
 
     /* Total kinetic energy */
     for(auto & atom : atoms) {
-        vv += (atom.vx*atom.vx + atom.vy*atom.vy + atom.vz*atom.vz);
+        vv = (atom.vx*atom.vx + atom.vy*atom.vy + atom.vz*atom.vz);
         lke += vv;
-
     }
-
     lke *= 0.5;
     MPI_Allreduce(&lke,&kinEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 
