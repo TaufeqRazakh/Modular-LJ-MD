@@ -17,6 +17,7 @@ systems using the Message Passing Interface (MPI) standard.
 #define DMUL 16807.0
 
 const double RCUT = 2.5; // Potential cut-off length
+const double MOVED_OUT = -1.0e10;
 
 using namespace std;
 
@@ -194,7 +195,7 @@ public:
     int kd,kdd,i,ku,inode,nsd,nrc,a;
     int nbnew = 0; /* # of "received" boundary atoms */
     double com1 = 0;
-    vector<vector<int> > lsb (6); 
+    vector<vector<int> > lsb (6);
 
     /* Main loop over x, y & z directions starts--------------------------*/
     for (kd=0; kd<3; kd++) {
@@ -280,7 +281,7 @@ public:
 	  sendBuf.swap(recvBuf);
 
 	// Message storing
-	for(i = 0; i < 4*nrc ;i ++) {
+	for(i = 0; i < 4*nrc ; i++) {
 	  Atom rAtom;
 
 	  rAtom.type = recvBuf[i];
@@ -314,51 +315,49 @@ public:
   // Send moved-out atoms to neighbor nodes and receive moved-in atoms
   // from neighbor nodes
   void AtomMove() {
+    vector<vector<int> > mvque (6); 
     int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
     int newim = 0; /* # of new immigrants */
-    double com1 = 0;
+    double com1 = 0;  
 
-    // Neglect the atoms in them cell that have entered throgh AtomCopy()
-    atoms.resize(n);
-    
-    // Iterate through neighbour nodes
-    for(auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
-      // Iterate through all atoms in this cell
+    /* Main loop over x, y & z directions starts------------------------*/
+
+  for (kd=0; kd<3; kd++) {
+
+        /* Make a moved-atom list, mvque----------------------------------*/
+
+    /* Scan all the residents & immigrants to list moved-out atoms */
+    for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom ) {
+      kul = 2*kd  ; /* Neighbor ID */
+      kuh = 2*kd+1; 
+      /* Register a to-be-copied atom in mvque[kul|kuh][] */      
+      if (it_atom->x > MOVED_OUT) { /* Don't scan moved-out atoms */
+        /* Move to the lower direction */
+	i = distance(atoms.begin(), it_atom);
+        if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
+        /* Move to the higher direction */
+        else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
+      }
+    }
+
+    /* Message passing------------------------------------------------*/   
+      
+    com1=MPI_Wtime(); /* To calculate the communication time */
+      
+    /* Loop over the lower & higher directions */
+    for (kdd=0; kdd<2; kdd++) {
+	
       vector<double> sendBuf;
       vector<double> recvBuf;
-      for(auto & atom : atoms) {
-	if(atom.isResident) {
-	  if(bmv(atom, *it_neighbor)) {
-	    i = distance(nn.begin(), it_neighbor);
-	    sendBuf.push_back(atom.type);
-	    sendBuf.push_back(atom.x - sv[i][0]);
-	    sendBuf.push_back(atom.y - sv[i][1]);
-	    sendBuf.push_back(atom.z - sv[i][2]);
-	    // In AtomMove we will also be considering the velocities
-	    sendBuf.push_back(atom.vx);
-	    sendBuf.push_back(atom.vy);
-	    sendBuf.push_back(atom.vz);
-	  
-	    atom.isResident = false;
-	  }
-	}
-      }      
-      
-      /* Message passing------------------------------------------------*/
-
-      // the first two neighbors need a x - parity check and so on
-      if(distance(nn.begin(), it_neighbor) < 2)
-	kd = 0;
-      else if(distance(nn.begin(), it_neighbor) < 4)
-	kd =1;
-      else
-	kd =2;
-      
-      com1=MPI_Wtime(); /* To calculate the communication time */
-
-      inode = *it_neighbor;
-      nsd = sendBuf.size(); /* # of atoms to be sent */
-      
+	
+      ku=2*kd+kdd;
+      // if(pid ==0) cout << "ku = " << ku << endl;
+      inode = nn[ku]; /* Neighbor node ID */
+      // if(pid == 0) cout << "inode = " << inode << endl;
+	
+      nsd = mvque[ku].size(); 
+      // cout << "copy number " << nsd << endl;
+	
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
 	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
@@ -374,61 +373,87 @@ public:
       /* Single layer: Exchange information with myself */
       else
 	nrc = nsd;
-      /* Now nrc is the # of atoms to be received */
 
+      /* Now nrc is the # of atoms to be received */
+      
+      /* Send & receive information on boundary atoms-----------------*/
+      
+      /* Message buffering */
+      for (auto it_index = mvque[ku].begin(); it_index != mvque[ku].end(); ++it_index) {
+	sendBuf.push_back(atoms[*it_index].type);
+	
+	sendBuf.push_back(atoms[*it_index].x - sv[ku][0]);
+	sendBuf.push_back(atoms[*it_index].y - sv[ku][1]);
+	sendBuf.push_back(atoms[*it_index].z - sv[ku][2]);
+	// In AtomMove we will also be considering the velocities
+	sendBuf.push_back(atoms[*it_index].vx);
+	sendBuf.push_back(atoms[*it_index].vy);
+	sendBuf.push_back(atoms[*it_index].vz);
+	  
+	atoms[*it_index].isResident = false;
+
+	// Mark the atom as moved out
+	atoms[*it_index].x = MOVED_OUT;
+      }
+               
       // resize the receive buffer for nrc
       recvBuf.resize(nrc);
       
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
-	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+	MPI_Send(&sendBuf[0],7*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Recv(&recvBuf[0],7*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
 		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       }
       /* Odd node: recv & send */
       else if (myparity[kd] == 1) {
-	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+	MPI_Recv(&recvBuf[0],7*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
 		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	MPI_Send(&sendBuf[0],7*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
       }
 	/* Single layer: Exchange information with myself */
       else
 	sendBuf.swap(recvBuf);
-
+      
       // Message storing
-      for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
+      for(i = 0; i < 4*nrc ;i++) {
 	Atom rAtom;
 	
-	rAtom.type = *it_recv;
-	++it_recv;
+	rAtom.type = recvBuf[i];
+	++i;
 	rAtom.isResident = true;
-	rAtom.x = *it_recv;
-	++it_recv;
-	rAtom.y = *it_recv;
-	++it_recv;
-	rAtom.z = *it_recv;
-	++it_recv;
-	rAtom.vx = *it_recv;
-	++it_recv;
-	rAtom.vy = *it_recv;
-	++it_recv;
-	rAtom.vz = *it_recv;	
+	rAtom.x = recvBuf[i];
+	++i;
+	rAtom.y = recvBuf[i];
+	++i;
+	rAtom.z = recvBuf[i];
+	++i;
+	rAtom.vx = recvBuf[i];
+	++i;
+	rAtom.vy = recvBuf[i];
+	++i;
+	rAtom.vz = recvBuf[i];	
 
 	atoms.push_back(rAtom);       
       }
-      
-      // Delete sent message after the step finishes
            
       /* Internode synchronization */
       MPI_Barrier(MPI_COMM_WORLD);
       
     } /* Endfor lower & higher directions, kdd */
 
-    atoms.erase(remove_if(atoms.begin(), atoms.end(), 
-                       [](Atom atom) { return !atom.isResident; }), atoms.end());
-    n = atoms.size();
-
     comt += MPI_Wtime()-com1; /* Update communication time, COMT */
+
+  } /* Endfor x, y & z directions, kd */
+
+  /* Main loop over x, y & z directions ends--------------------------*/
+
+  /* Compress resident arrays including new immigrants */
+
+  
+  remove_if(atoms.begin(), atoms.end(), 
+	    [](Atom atom) { return atom.x > MOVED_OUT; });
+  
   }
   
   // Return true if an Atom lies in them boundary to a neighbor ID
@@ -458,7 +483,7 @@ public:
 
   // Return true if an Atom lies in them boundary to a neighbor ID
   int bmv(Atom atom, int ku) {
-    if (atom.isResident == 0) return 0; // Do not consider atoms that have moved already 
+    //if (!atom.isResident) return 0; // Do not consider atoms that have moved already
     int kd,kdd;
     kd = ku/2; /* x(0)|y(1)|z(2) direction */
     kdd = ku%2; /* Lower(0)|higher(1) direction */
@@ -521,7 +546,7 @@ public:
     temperature = kinEnergy*2.0/3.0;
 
     /* Print the computed properties */
-    if (pid == 0) cout << stepCount*DeltaT << " " << lke << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;;
+    if (pid == 0) cout << stepCount*DeltaT << " " << lke << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;
   }
 };
 
@@ -576,7 +601,7 @@ int main(int argc, char **argv) {
 
    cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    // if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
+    if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
     SingleStep(subsystem, DeltaT);    
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
