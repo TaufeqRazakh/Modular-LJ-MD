@@ -132,8 +132,12 @@ rv are initialized with a random velocity corresponding to Temperature.
       for (nX=0; nX<InitUcell[0]; nX++) {
         c[0] = nX*gap[0];
         for (j=0; j<4; j++) {
-          for (a=0; a<3; a++)
+	  /* if(sid ==0) printf("atom coordinates -"); */
+          for (a=0; a<3; a++){
             r[n][a] = c[a] + gap[a]*origAtom[j][a];
+	    /* if(sid == 0) printf(" %f", r[n][a]); */
+	  }
+	  /* if(sid ==0) printf("\n"); */
           ++n;
         }
       }
@@ -172,7 +176,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  atom_move();
+  /* atom_move(); */
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
@@ -214,8 +218,11 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
            according to bit-condition function, bbd */
         if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
+	else
+	  if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
       }
     }
+    if(sid == 0) printf("atoms searched as far as %d\n", i);
 
     /* Message passing------------------------------------------------*/
 
@@ -225,11 +232,11 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
     for (kdd=0; kdd<2; kdd++) {
 
       inode = nn[ku=2*kd+kdd]; /* Neighbor node ID */
-
+      /* if(sid ==0) printf("inode = %d\n", inode); */
       /* Send & receive the # of boundary atoms-----------------------*/
 
       nsd = lsb[ku][0]; /* # of atoms to be sent */
-
+      /* if(sid==0) printf("copy number %d\n", nsd); */
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
         MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
@@ -247,12 +254,18 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         nrc = nsd;
       /* Now nrc is the # of atoms to be received */
 
+      if(sid == 0) printf("nsd = %d\n", nsd);
       /* Send & receive information on boundary atoms-----------------*/
 
       /* Message buffering */
-      for (i=1; i<=nsd; i++)
-        for (a=0; a<3; a++) /* Shift the coordinate origin */
-          dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a]; 
+      for (i=1; i<=nsd; i++) {
+	/* if(sid == 0) printf("copy -"); */
+        for (a=0; a<3; a++) /* Shift the coordinate origin */{
+          dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a];
+	  /* if(sid == 0) printf(" %f",  dbuf[3*(i-1)+a]); */
+	}
+	/* if(sid == 0) printf("\n"); */
+      }
 
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
@@ -271,8 +284,14 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         for (i=0; i<3*nrc; i++) dbufr[i] = dbuf[i];
 
       /* Message storing */
-      for (i=0; i<nrc; i++)
-        for (a=0; a<3; a++) r[n+nbnew+i][a] = dbufr[3*i+a]; 
+      for (i=0; i<nrc; i++) {
+	if(sid ==0) printf("arriving in atom copy -");
+        for (a=0; a<3; a++) {
+	  r[n+nbnew+i][a] = dbufr[3*i+a];
+	  if(sid == 0) printf(" %f", dbufr[3*i+a]);
+	    }
+	if(sid == 0) printf("\n");
+      }
 
       /* Increment the # of received boundary atoms */
       nbnew = nbnew+nrc;
@@ -317,7 +336,7 @@ the residents.
   for (c=0; c<lcxyz2; c++) head[c] = EMPTY;
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-
+  printf("atoms in subsystem = %d\n", (n+nb));
   for (i=0; i<n+nb; i++) {
     for (a=0; a<3; a++) mc[a] = (r[i][a]+rc[a])/rc[a];
 
@@ -401,6 +420,7 @@ the residents.
   } /* Endfor central cell, c */
 
   /* Global potential energy */
+  printf("%d\n", lpe);
   MPI_Allreduce(&lpe,&potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
 
@@ -427,8 +447,8 @@ Evaluates physical properties: kinetic, potential & total energies.
   temperature = kinEnergy*2.0/3.0;
 
   /* Print the computed properties */
-  if (sid == 0) printf("%9.6f %9.6f %9.6f %9.6f\n",
-                stepCount*DeltaT,temperature,potEnergy,totEnergy);
+  if (sid == 0) printf("%9.6f %9.6f %9.6f %9.6f %9.6f\n",
+		       stepCount*DeltaT,lke,temperature,potEnergy,totEnergy);
 }
 
 /*--------------------------------------------------------------------*/

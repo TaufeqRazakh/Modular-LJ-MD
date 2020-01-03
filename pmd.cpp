@@ -21,7 +21,7 @@ const double RCUT = 2.5; // Potential cut-off length
 using namespace std;
 
 // Class for keeping track of the properties for an atom
-class Atom{
+class Atom {
 public:
   double type;             // identifier for atom type
   bool isResident;
@@ -69,7 +69,7 @@ public:
 
     /* Compute basic parameters */
     for (int i=0; i<3; i++) al[i] = InitUcell[i]/cbrt(Density/4.0);
-    if (pid == 0) cout << "al = " << al[0] << " " << al[1] <<  " " << al[2] << endl;
+    // if (pid == 0) cout << "al = " << al[0] << " " << al[1] <<  " " << al[2] << endl;
 
     // Prepare the Neighbot-node table
     InitNeighborNode(vproc);
@@ -99,6 +99,7 @@ public:
 	    atom.y = c[1] + gap[1]*origAtom[j][1];
 
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
+	    // if(pid == 0) cout << "atom coordinates - " << atom.x << " " << atom.y << " " << atom.z << endl;
 
 	    atoms.push_back(atom);	    
 	  }
@@ -173,18 +174,18 @@ public:
   // Update Atomic co-ordinates to r(t+Dt)
   void Update(double DeltaT) {
     for(auto & atom : atoms) {
-      atom.x += DeltaT*atom.vx;
-      atom.y += DeltaT*atom.vz;
-      atom.z += DeltaT*atom.vy;
+      atom.x = atom.x + DeltaT*atom.vx;
+      atom.y = atom.y + DeltaT*atom.vz;
+      atom.z = atom.z +DeltaT*atom.vy;
     }
   }
 
   // Update the velocities after a time-step DeltaT
   void Kick(double DeltaT) {
     for (auto & atom : atoms) {
-      atom.vx += DeltaT*atom.ax;
-      atom.vy += DeltaT*atom.ay;
-      atom.vz += DeltaT*atom.az;
+      atom.vx = atom.vx + DeltaT*atom.ax;
+      atom.vy = atom.vy + DeltaT*atom.ay;
+      atom.vz = atom.vz +DeltaT*atom.az;
     }
   }
 
@@ -193,101 +194,121 @@ public:
     int kd,kdd,i,ku,inode,nsd,nrc,a;
     int nbnew = 0; /* # of "received" boundary atoms */
     double com1 = 0;
+    vector<vector<int> > lsb (6); 
 
-    // Iterate through neighbour nodes
-    for( auto it_neighbor = nn.begin(); it_neighbor != nn.end(); ++it_neighbor) {
+    /* Main loop over x, y & z directions starts--------------------------*/
+    for (kd=0; kd<3; kd++) {
+
       // Iterate through all atoms in this cell
-      vector<double> sendBuf;
-      vector<double> recvBuf;
-      for(auto & atom : atoms) {
-	if(bbd(atom, *it_neighbor)) {
-	  sendBuf.push_back(atom.type);
-	  sendBuf.push_back(atom.x);
-	  sendBuf.push_back(atom.y);
-	  sendBuf.push_back(atom.z);
-	}
-      }      
-      
-      /* Message passing------------------------------------------------*/
-
-      // the first two neighbors need a x - parity check and so on
-      if(distance(nn.begin(), it_neighbor) < 2)
-	kd = 0;
-      else if(distance(nn.begin(), it_neighbor) < 4)
-	kd = 1;
-      else
-	kd = 2;
+      for(auto it_atom = atoms.begin(); it_atom != atoms.end(); ++it_atom ) {
+	for (kdd=0; kdd<2; kdd++) {
+	  ku = 2*kd+kdd; /* Neighbor ID */
+	  /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
+	     according to bit-condition function, bbd */
+	  i = distance(atoms.begin(), it_atom);
+	  if (bbd(*it_atom,ku)) lsb[ku].push_back(i);	 
+	}       
+      }
+      // if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
+      // if(pid == 0)cout << "atoms searched as far as " << i << endl;
+      /* Message passing------------------------------------------------*/   
       
       com1=MPI_Wtime(); /* To calculate the communication time */
-
-      inode = *it_neighbor;
-      //cout << "inode = " << inode << endl;
-      nsd = sendBuf.size(); /* # of atoms to be sent */
-
-      /* Even node: send & recv */
-      if (myparity[kd] == 0) {
-	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-      }
-      /* Odd node: recv & send */
-      else if (myparity[kd] == 1) {
-	MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
-		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-	MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
-      }
-      /* Single layer: Exchange information with myself */
-      else
-	nrc = nsd;
-      /* Now nrc is the # of atoms to be received */
-
-      // resize the receive buffer for nrc
-      recvBuf.resize(nrc);
       
-      /* Even node: send & recv */
-      if (myparity[kd] == 0) {
-      	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-      	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-      		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-      }
-      /* Odd node: recv & send */
-      else if (myparity[kd] == 1) {
-      	MPI_Recv(&recvBuf.front(),nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
-      		 MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-      	MPI_Send(&sendBuf.front(),nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
-      }
-      	/* Single layer: Exchange information with myself */
-      else
-      	sendBuf.swap(recvBuf);
+      /* Loop over the lower & higher directions */
+      for (kdd=0; kdd<2; kdd++) {
+	
+	vector<double> sendBuf;
+	vector<double> recvBuf;
+	
+	ku=2*kd+kdd;
+	// if(pid ==0) cout << "ku = " << ku << endl;
+	inode = nn[ku]; /* Neighbor node ID */
+	// if(pid == 0) cout << "inode = " << inode << endl;
+	
+	nsd = lsb[ku].size(); 
+	// cout << "copy number " << nsd << endl;
+	
+	/* Even node: send & recv */
+	if (myparity[kd] == 0) {
+	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		   MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	}
+	/* Odd node: recv & send */
+	else if (myparity[kd] == 1) {
+	  MPI_Recv(&nrc,1,MPI_INT,MPI_ANY_SOURCE,10,
+		   MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	  MPI_Send(&nsd,1,MPI_INT,inode,10,MPI_COMM_WORLD);
+	}
+	/* Single layer: Exchange information with myself */
+	else
+	  nrc = nsd;
 
-      // Message storing
-      for(auto it_recv = recvBuf.begin(); it_recv != recvBuf.end(); ++it_recv) {
-	Atom rAtom;
-
-	//if(pid == 0) cout << "type: " << *it_recv;
-	rAtom.type = *it_recv;
-	++it_recv;
-	rAtom.isResident = false;
-	//if(pid == 0) cout << " x: " << *it_recv;
-	rAtom.x = *it_recv;
-	++it_recv;
-	//if(pid == 0) cout << " y: " << *it_recv;
-	rAtom.y = *it_recv;
-	++it_recv;
-	//if(pid == 0) cout << " z: " << *it_recv << endl;
-	rAtom.z = *it_recv;
-
-	atoms.push_back(rAtom);       
-      }
+	// if(pid == 0) cout << "nrc = " << nrc /4<< endl;
+	/* Now nrc is the # of atoms to be received */
+	
+	/* Send & receive information on boundary atoms-----------------*/
+	
+	/* Message buffering */
+	for (auto it_index = lsb[ku].begin(); it_index != lsb[ku].end(); ++it_index) {
+	  sendBuf.push_back(atoms[*it_index].type);
+	  sendBuf.push_back(atoms[*it_index].x - sv[ku][0]);
+	  // if(pid == 0) cout << "copy - " << atoms[*it_index].x - sv[ku][0] << " ";
+	  sendBuf.push_back(atoms[*it_index].y - sv[ku][1]);
+	  // if(pid ==0) cout << atoms[*it_index].y - sv[ku][1] << " ";
+	  sendBuf.push_back(atoms[*it_index].z - sv[ku][2]);
+	  // if(pid ==0) cout << atoms[*it_index].z - sv[ku][2] << " " << endl;
+	}		
+	// resize the receive buffer for nrc
+	recvBuf.resize(4*nrc);
       
-      // Delete sent message after the step finishes
-           
-      /* Internode synchronization */
-      MPI_Barrier(MPI_COMM_WORLD);
-      
-    } /* Endfor lower & higher directions, kdd */
+	/* Even node: send & recv */
+	if (myparity[kd] == 0) {
+	  MPI_Send(&sendBuf[0],4*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	  MPI_Recv(&recvBuf[0],4*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		   MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	}
+	/* Odd node: recv & send */
+	else if (myparity[kd] == 1) {
+	  MPI_Recv(&recvBuf[0],4*nrc,MPI_DOUBLE,MPI_ANY_SOURCE,20,
+		   MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+	  MPI_Send(&sendBuf[0],4*nsd,MPI_DOUBLE,inode,20,MPI_COMM_WORLD);
+	}
+	/* Single layer: Exchange information with myself */
+	else
+	  sendBuf.swap(recvBuf);
 
-    comt += MPI_Wtime()-com1; /* Update communication time, COMT */
+	// Message storing
+	for(i = 0; i < 4*nrc ;i ++) {
+	  Atom rAtom;
+
+	  rAtom.type = recvBuf[i];
+	  ++i;
+	  rAtom.isResident = false;
+	  rAtom.x =  recvBuf[i];
+	  ++i;
+	  rAtom.y =  recvBuf[i];
+	  ++i;
+	  rAtom.z =  recvBuf[i];
+	  // if(pid == 0) cout << " arriving in atom copy - x: " << rAtom.x;
+	//   rAtom.x = *it_recv;
+	//   ++it_recv;
+	  // if(pid == 0) cout << " y: " << rAtom.y;
+	//   rAtom.y = *it_recv;
+	//   ++it_recv;
+	  // if(pid == 0) cout << " z: " << rAtom.z << endl;
+	//   rAtom.z = *it_recv;
+	
+	  atoms.push_back(rAtom);	  
+	}
+	/* Internode synchronization */
+	MPI_Barrier(MPI_COMM_WORLD);
+      
+      } /* Endfor lower & higher directions, kdd */
+      
+      comt += MPI_Wtime()-com1; /* Update communication time, COMT */
+    }
   }
 
   // Send moved-out atoms to neighbor nodes and receive moved-in atoms
@@ -306,17 +327,20 @@ public:
       vector<double> sendBuf;
       vector<double> recvBuf;
       for(auto & atom : atoms) {
-	if(bmv(atom, *it_neighbor)) {
-	  sendBuf.push_back(atom.type);
-	  sendBuf.push_back(atom.x);
-	  sendBuf.push_back(atom.y);
-	  sendBuf.push_back(atom.z);
-	  // In AtomMove we will also be considering the velocities
-	  sendBuf.push_back(atom.vx);
-	  sendBuf.push_back(atom.vy);
-	  sendBuf.push_back(atom.vz);
+	if(atom.isResident) {
+	  if(bmv(atom, *it_neighbor)) {
+	    i = distance(nn.begin(), it_neighbor);
+	    sendBuf.push_back(atom.type);
+	    sendBuf.push_back(atom.x - sv[i][0]);
+	    sendBuf.push_back(atom.y - sv[i][1]);
+	    sendBuf.push_back(atom.z - sv[i][2]);
+	    // In AtomMove we will also be considering the velocities
+	    sendBuf.push_back(atom.vx);
+	    sendBuf.push_back(atom.vy);
+	    sendBuf.push_back(atom.vz);
 	  
-	  atom.isResident = false;
+	    atom.isResident = false;
+	  }
 	}
       }      
       
@@ -409,7 +433,7 @@ public:
   
   // Return true if an Atom lies in them boundary to a neighbor ID
   int bbd(Atom atom, int ku) {
-    if (atom.isResident == 0) return 0; // Do not consider atoms that have moved already 
+    // if (atom.isResident == false) return false; // Do not consider atoms that have moved already 
     int kd,kdd;
     kd = ku/2; /* x(0)|y(1)|z(2) direction */
     kdd = ku%2; /* Lower(0)|higher(1) direction */
@@ -497,7 +521,7 @@ public:
     temperature = kinEnergy*2.0/3.0;
 
     /* Print the computed properties */
-    if (pid == 0) cout << stepCount*DeltaT << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;;
+    if (pid == 0) cout << stepCount*DeltaT << " " << lke << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;;
   }
 };
 
@@ -594,6 +618,7 @@ void ComputeAccel(SubSystem &subsystem) {
   array<double, 3> rc{};
 
   //vector<int> head;
+  map<int, int> head;
   vector<int> lscl (subsystem.atoms.size());
   int EMPTY = -1;
   
@@ -626,11 +651,11 @@ void ComputeAccel(SubSystem &subsystem) {
   lcyz2 = lc2[1]*lc2[2];
   lcxyz2 = lc2[0]*lcyz2;
 
-  map<int, int> head;
   /* Reset the headers, head */
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
+  cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
     mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
@@ -706,16 +731,16 @@ void ComputeAccel(SubSystem &subsystem) {
 		      if (bintra) lpe += vVal; else lpe += 0.5*vVal;
 
 		      f = fcVal*dr[0];
-		      subsystem.atoms[j].x += f;
-		      if(bintra) subsystem.atoms[i].x -= f;
+		      subsystem.atoms[i].ax += f;
+		      if(bintra) subsystem.atoms[j].ax -= f;
 	      
 		      f = fcVal*dr[1];
-		      subsystem.atoms[j].y += f;
-		      if(bintra) subsystem.atoms[i].y -= f;
+		      subsystem.atoms[i].ay += f;
+		      if(bintra) subsystem.atoms[j].ay -= f;
 	      
 		      f = fcVal*dr[0];
-		      subsystem.atoms[j].z += f;
-		      if(bintra) subsystem.atoms[i].z -= f;	                   
+		      subsystem.atoms[i].az += f;
+		      if(bintra) subsystem.atoms[j].az -= f;	                   
 		    }
 		  } /* Endif not self */
           
@@ -730,5 +755,6 @@ void ComputeAccel(SubSystem &subsystem) {
       } /* Endfor central cell, c */
 
   /* Global potential energy */
+  cout << lpe << endl;
   MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
