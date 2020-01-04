@@ -222,6 +222,7 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
 	  //if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
       }
     }
+    if(sid == 0) printf("atoms identified for copy to %d & %d : %d %d\n", (ku-1), ku, lsb[ku-1][0], lsb[ku][0]);
     //if(sid == 0) printf("atoms searched as far as %d\n", i);
 
     /* Message passing------------------------------------------------*/
@@ -420,7 +421,7 @@ the residents.
   } /* Endfor central cell, c */
 
   /* Global potential energy */
-  printf("%d\n", lpe);
+  printf("local potential energy %f\n", lpe);
   MPI_Allreduce(&lpe,&potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
 
@@ -492,7 +493,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       }
     }
 
-    if(sid ==0) printf("atoms moved to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]);
+    if(sid ==0) printf("atoms identified for move to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]);
     /* Message passing with neighbor nodes----------------------------*/
 
     com1 = MPI_Wtime();

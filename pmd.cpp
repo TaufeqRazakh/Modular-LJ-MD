@@ -211,7 +211,7 @@ public:
 	  if (bbd(*it_atom,ku)) lsb[ku].push_back(i);	 
 	}       
       }
-      // if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
+      if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
       // if(pid == 0)cout << "atoms searched as far as " << i << endl;
       /* Message passing------------------------------------------------*/   
       
@@ -335,24 +335,26 @@ public:
       if (it_atom->x > MOVED_OUT) { /* Don't scan moved-out atoms */
         /* Move to the lower direction */
 	i = distance(atoms.begin(), it_atom);
-        if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
+	if(it_atom->isResident) {
+	  if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
         /* Move to the higher direction */
-        else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
+	  else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
+	}
       }
     }
-    if(pid ==0) cout << "atoms moved to : " << kul << " " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
+    if(pid ==0) cout << "atoms identified for move to : " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
     /* Message passing------------------------------------------------*/   
       
     com1=MPI_Wtime(); /* To calculate the communication time */
       
     /* Loop over the lower & higher directions */
     for (kdd=0; kdd<2; kdd++) {
-      if(pid ==0) cout << "kdd " << kdd << endl;
+      // if(pid ==0) cout << "kdd " << kdd << endl;
       vector<double> sendBuf;
       vector<double> recvBuf;
 	
       ku=2*kd+kdd;
-      if(pid ==0) cout << "ku = " << ku << endl;
+      // if(pid ==0) cout << "ku = " << ku << endl;
       inode = nn[ku]; /* Neighbor node ID */
       // if(pid == 0) cout << "inode = " << inode << endl;
 	
@@ -480,8 +482,7 @@ public:
   }
 
   // Return true if an Atom lies in them boundary to a neighbor ID
-  int bmv(Atom atom, int ku) {
-    if (!atom.isResident) return 0; // Do not consider atoms that have moved already
+  int bmv(Atom atom, int ku) {    
     int kd,kdd;
     kd = ku/2; /* x(0)|y(1)|z(2) direction */
     kdd = ku%2; /* Lower(0)|higher(1) direction */
@@ -550,7 +551,7 @@ public:
 
 /*--------------------------------------------------------------------*/
 int main(int argc, char **argv) {
-/*--------------------------------------------------------------------*/
+  /*--------------------------------------------------------------------*/
   // cpu - Elapsed wall clock time in seconds
   double cpu,cpu1;
 
@@ -583,23 +584,13 @@ int main(int argc, char **argv) {
 
   ifs.close();
 
-  // set_topology(); This is now implemented in the Cell object. Each cell makes its neighbor tables
-  // init_conf(); This is now implemented within the Cell constructor
-
   SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
-  //   cout << endl;
-  //   for(auto & v : subsystem.nn) {
-  //     cout << v << " ";
-  //   }
-  //   cout << endl;
-  // }
   subsystem.AtomCopy();
   ComputeAccel(subsystem);
 
-   cpu1 = MPI_Wtime();
+  cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    if(sid == 0)  cout << stepCount << " / " << StepLimit << endl;
     SingleStep(subsystem, DeltaT);    
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
   }
@@ -678,7 +669,7 @@ void ComputeAccel(SubSystem &subsystem) {
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
+  if(subsystem.pid == 0) cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
     mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
@@ -778,6 +769,6 @@ void ComputeAccel(SubSystem &subsystem) {
       } /* Endfor central cell, c */
 
   /* Global potential energy */
-  cout << lpe << endl;
+  if(subsystem.pid == 0) cout << "local potential energy " << lpe << endl;
   MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
