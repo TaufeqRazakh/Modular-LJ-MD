@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
   init_params();
   set_topology(); 
   init_conf();
-  atom_copy();
+  /* atom_copy(); */
   compute_accel(); /* Computes initial accelerations */ 
 
   cpu1 = MPI_Wtime();
@@ -176,7 +176,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  atom_move();
+  /* atom_move(); */
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */

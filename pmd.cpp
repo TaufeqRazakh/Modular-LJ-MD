@@ -197,8 +197,11 @@ public:
     double com1 = 0;
     vector<vector<int> > lsb (6);
 
-    remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;});
-    /* Main loop over x, y & z directions starts--------------------------*/
+    remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;});    
+    atoms.resize(n);
+
+
+     /* Main loop over x, y & z directions starts--------------------------*/
     for (kd=0; kd<3; kd++) {
 
       // Iterate through all atoms in this cell
@@ -320,7 +323,7 @@ public:
     int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
     int newim = 0; /* # of new immigrants */
     double com1 = 0;  
-
+    
     /* Main loop over x, y & z directions starts------------------------*/
 
   for (kd=0; kd<3; kd++) {
@@ -332,16 +335,16 @@ public:
       kul = 2*kd  ; /* Neighbor ID */
       kuh = 2*kd+1; 
       /* Register a to-be-copied atom in mvque[kul|kuh][] */      
-      if (it_atom->x > MOVED_OUT) { /* Don't scan moved-out atoms */
-        /* Move to the lower direction */
-	i = distance(atoms.begin(), it_atom);
-	if(it_atom->isResident) {
-	  if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
+     
+      /* Move to the lower direction */
+      i = distance(atoms.begin(), it_atom);
+      if(it_atom->isResident) {
+	if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
         /* Move to the higher direction */
-	  else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
-	}
-      }
+	else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
+      }      
     }
+    
     if(pid ==0) cout << "atoms identified for move to : " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
     /* Message passing------------------------------------------------*/   
       
@@ -452,7 +455,8 @@ public:
 
   
   remove_if(atoms.begin(), atoms.end(), 
-  	    [](Atom atom) { return atom.x >= MOVED_OUT; });
+  	    [](Atom atom) { return atom.x > MOVED_OUT; });
+    atoms.shrink_to_fit();
   
   }
   
@@ -586,7 +590,7 @@ int main(int argc, char **argv) {
 
   SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
-  subsystem.AtomCopy();
+  // subsystem.AtomCopy();
   ComputeAccel(subsystem);
 
   cpu1 = MPI_Wtime();
@@ -609,7 +613,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   double DeltaTH = DeltaT / 2.0;
   subsystem.Kick(DeltaTH); /* First half kick to obtain v(t+Dt/2) */
   subsystem.Update(DeltaT);
-  subsystem.AtomMove();
+  // subsystem.AtomMove();
   subsystem.AtomCopy();
   ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
   subsystem.Kick(DeltaTH); /* Second half kick to obtain v(t+Dt) */
