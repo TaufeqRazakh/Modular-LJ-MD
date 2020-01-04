@@ -197,10 +197,7 @@ public:
     double com1 = 0;
     vector<vector<int> > lsb (6);
 
-    remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;});    
-    atoms.resize(n);
-
-
+    atoms.erase(remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;}), atoms.end());
      /* Main loop over x, y & z directions starts--------------------------*/
     for (kd=0; kd<3; kd++) {
 
@@ -323,7 +320,9 @@ public:
     int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
     int newim = 0; /* # of new immigrants */
     double com1 = 0;  
-    
+
+    atoms.erase(remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;}), atoms.end());
+    //atoms.resize(n);
     /* Main loop over x, y & z directions starts------------------------*/
 
   for (kd=0; kd<3; kd++) {
@@ -338,14 +337,14 @@ public:
      
       /* Move to the lower direction */
       i = distance(atoms.begin(), it_atom);
-      if(it_atom->isResident) {
+      if(it_atom->x > MOVED_OUT) {
 	if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
         /* Move to the higher direction */
 	else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
       }      
     }
     
-    if(pid ==0) cout << "atoms identified for move to : " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
+    if(pid ==0) cout << "atoms identified for move to " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
     /* Message passing------------------------------------------------*/   
       
     com1=MPI_Wtime(); /* To calculate the communication time */
@@ -442,6 +441,8 @@ public:
 
 	atoms.push_back(rAtom);
       }
+
+      n = atoms.size();
       /* Internode synchronization */
       MPI_Barrier(MPI_COMM_WORLD);
     } /* Endfor lower & higher directions, kdd */
@@ -453,10 +454,11 @@ public:
 
   /* Compress resident arrays including new immigrants */
 
-  
-  remove_if(atoms.begin(), atoms.end(), 
-  	    [](Atom atom) { return atom.x > MOVED_OUT; });
-    atoms.shrink_to_fit();
+  if(pid == 0) cout << "atoms before AtomCopy = " << n << endl;
+  atoms.erase(remove_if(atoms.begin(), atoms.end(),
+			[](Atom atom) { return atom.x <= MOVED_OUT; }), atoms.end());
+  n = atoms.size();
+  if(pid == 0) cout << "atoms after AtomCopy = " << n << endl;
   
   }
   
@@ -590,7 +592,7 @@ int main(int argc, char **argv) {
 
   SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
-  // subsystem.AtomCopy();
+  subsystem.AtomCopy();
   ComputeAccel(subsystem);
 
   cpu1 = MPI_Wtime();
@@ -613,7 +615,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   double DeltaTH = DeltaT / 2.0;
   subsystem.Kick(DeltaTH); /* First half kick to obtain v(t+Dt/2) */
   subsystem.Update(DeltaT);
-  // subsystem.AtomMove();
+  subsystem.AtomMove();
   subsystem.AtomCopy();
   ComputeAccel(subsystem); /* Computes new accelerations, a(t+Dt) */
   subsystem.Kick(DeltaTH); /* Second half kick to obtain v(t+Dt) */
@@ -673,7 +675,7 @@ void ComputeAccel(SubSystem &subsystem) {
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  if(subsystem.pid == 0) cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
+  cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
     mc[1] = (int)(it_atom->y + rc[1]) / rc[1];

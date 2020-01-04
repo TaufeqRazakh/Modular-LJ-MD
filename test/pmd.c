@@ -19,8 +19,8 @@ int main(int argc, char **argv) {
   init_params();
   set_topology(); 
   init_conf();
-  /* atom_copy(); */
-  compute_accel(); /* Computes initial accelerations */ 
+  //atom_copy();
+  //compute_accel(); /* Computes initial accelerations */ 
 
   cpu1 = MPI_Wtime();
   for (stepCount=1; stepCount<=StepLimit; stepCount++) {
@@ -176,8 +176,8 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  /* atom_move(); */
-  atom_copy();
+  atom_move();
+  //atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
 }
@@ -574,7 +574,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
   /* Main loop over x, y & z directions ends--------------------------*/
 
   /* Compress resident arrays including new immigrants */
-
+  if(sid ==0) printf("atoms before atom_copy %d\n", n);
   ipt = 0;
   for (i=0; i<n+newim; i++) {
     if (r[i][0] > MOVED_OUT) {
@@ -588,6 +588,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
 
   /* Update the compressed # of resident atoms */
   n = ipt;
+  if(sid ==0) printf("atoms after atom_copy %d\n", n);
 }
 
 /*----------------------------------------------------------------------
