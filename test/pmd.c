@@ -176,7 +176,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   half_kick(); /* First half kick to obtain v(t+Dt/2) */
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
-  /* atom_move(); */
+  atom_move();
   atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
@@ -218,11 +218,11 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
            according to bit-condition function, bbd */
         if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
-	else
-	  if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
+	//else
+	  //if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
       }
     }
-    if(sid == 0) printf("atoms searched as far as %d\n", i);
+    //if(sid == 0) printf("atoms searched as far as %d\n", i);
 
     /* Message passing------------------------------------------------*/
 
@@ -254,7 +254,7 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         nrc = nsd;
       /* Now nrc is the # of atoms to be received */
 
-      if(sid == 0) printf("nsd = %d\n", nsd);
+      //if(sid == 0) printf("nsd = %d\n", nsd);
       /* Send & receive information on boundary atoms-----------------*/
 
       /* Message buffering */
@@ -285,12 +285,12 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
 
       /* Message storing */
       for (i=0; i<nrc; i++) {
-	if(sid ==0) printf("arriving in atom copy -");
+	//if(sid ==0) printf("arriving in atom copy -");
         for (a=0; a<3; a++) {
 	  r[n+nbnew+i][a] = dbufr[3*i+a];
-	  if(sid == 0) printf(" %f", dbufr[3*i+a]);
+	  //if(sid == 0) printf(" %f", dbufr[3*i+a]);
 	    }
-	if(sid == 0) printf("\n");
+	//	if(sid == 0) printf("\n");
       }
 
       /* Increment the # of received boundary atoms */
@@ -492,6 +492,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       }
     }
 
+    if(sid ==0) printf("atoms moved to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]);
     /* Message passing with neighbor nodes----------------------------*/
 
     com1 = MPI_Wtime();

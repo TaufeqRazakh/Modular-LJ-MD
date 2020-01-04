@@ -197,6 +197,7 @@ public:
     double com1 = 0;
     vector<vector<int> > lsb (6);
 
+    remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;});
     /* Main loop over x, y & z directions starts--------------------------*/
     for (kd=0; kd<3; kd++) {
 
@@ -339,19 +340,19 @@ public:
         else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
       }
     }
-
+    if(pid ==0) cout << "atoms moved to : " << kul << " " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
     /* Message passing------------------------------------------------*/   
       
     com1=MPI_Wtime(); /* To calculate the communication time */
       
     /* Loop over the lower & higher directions */
     for (kdd=0; kdd<2; kdd++) {
-	
+      if(pid ==0) cout << "kdd " << kdd << endl;
       vector<double> sendBuf;
       vector<double> recvBuf;
 	
       ku=2*kd+kdd;
-      // if(pid ==0) cout << "ku = " << ku << endl;
+      if(pid ==0) cout << "ku = " << ku << endl;
       inode = nn[ku]; /* Neighbor node ID */
       // if(pid == 0) cout << "inode = " << inode << endl;
 	
@@ -389,15 +390,15 @@ public:
 	sendBuf.push_back(atoms[*it_index].vx);
 	sendBuf.push_back(atoms[*it_index].vy);
 	sendBuf.push_back(atoms[*it_index].vz);
-	  
-	atoms[*it_index].isResident = false;
 
+	
+	//atoms[*it_index].isResident = false;
 	// Mark the atom as moved out
 	atoms[*it_index].x = MOVED_OUT;
       }
                
       // resize the receive buffer for nrc
-      recvBuf.resize(nrc);
+      recvBuf.resize(7*nrc);
       
       /* Even node: send & recv */
       if (myparity[kd] == 0) {
@@ -414,9 +415,9 @@ public:
 	/* Single layer: Exchange information with myself */
       else
 	sendBuf.swap(recvBuf);
-      
+
       // Message storing
-      for(i = 0; i < 4*nrc ;i++) {
+      for(i = 0; i < 7*nrc ;i++) {
 	Atom rAtom;
 	
 	rAtom.type = recvBuf[i];
@@ -434,16 +435,13 @@ public:
 	++i;
 	rAtom.vz = recvBuf[i];	
 
-	atoms.push_back(rAtom);       
+	atoms.push_back(rAtom);
       }
-           
       /* Internode synchronization */
       MPI_Barrier(MPI_COMM_WORLD);
-      
     } /* Endfor lower & higher directions, kdd */
 
     comt += MPI_Wtime()-com1; /* Update communication time, COMT */
-
   } /* Endfor x, y & z directions, kd */
 
   /* Main loop over x, y & z directions ends--------------------------*/
@@ -452,7 +450,7 @@ public:
 
   
   remove_if(atoms.begin(), atoms.end(), 
-	    [](Atom atom) { return atom.x > MOVED_OUT; });
+  	    [](Atom atom) { return atom.x >= MOVED_OUT; });
   
   }
   
@@ -483,7 +481,7 @@ public:
 
   // Return true if an Atom lies in them boundary to a neighbor ID
   int bmv(Atom atom, int ku) {
-    //if (!atom.isResident) return 0; // Do not consider atoms that have moved already
+    if (!atom.isResident) return 0; // Do not consider atoms that have moved already
     int kd,kdd;
     kd = ku/2; /* x(0)|y(1)|z(2) direction */
     kdd = ku%2; /* Lower(0)|higher(1) direction */
