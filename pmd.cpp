@@ -197,7 +197,7 @@ public:
     double com1 = 0;
     vector<vector<int> > lsb (6);
 
-    atoms.erase(remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;}), atoms.end());
+    //atoms.erase(remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;}), atoms.end());
      /* Main loop over x, y & z directions starts--------------------------*/
     for (kd=0; kd<3; kd++) {
 
