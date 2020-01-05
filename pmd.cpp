@@ -441,8 +441,7 @@ public:
 
 	atoms.push_back(rAtom);
       }
-
-      n = atoms.size();
+      
       /* Internode synchronization */
       MPI_Barrier(MPI_COMM_WORLD);
     } /* Endfor lower & higher directions, kdd */
@@ -454,11 +453,11 @@ public:
 
   /* Compress resident arrays including new immigrants */
 
-  if(pid == 0) cout << "atoms before AtomCopy = " << n << endl;
+  if(pid == 0) cout << "atoms before AtomMove = " << n << endl;
   atoms.erase(remove_if(atoms.begin(), atoms.end(),
 			[](Atom atom) { return atom.x <= MOVED_OUT; }), atoms.end());
   n = atoms.size();
-  if(pid == 0) cout << "atoms after AtomCopy = " << n << endl;
+  if(pid == 0) cout << "atoms after AtomMove = " << n << endl;
   
   }
   

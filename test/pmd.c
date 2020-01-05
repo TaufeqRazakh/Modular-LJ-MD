@@ -574,7 +574,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
   /* Main loop over x, y & z directions ends--------------------------*/
 
   /* Compress resident arrays including new immigrants */
-  if(sid ==0) printf("atoms before atom_copy %d\n", n);
+  if(sid ==0) printf("atoms before atom_move %d\n", n);
   ipt = 0;
   for (i=0; i<n+newim; i++) {
     if (r[i][0] > MOVED_OUT) {
@@ -588,7 +588,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
 
   /* Update the compressed # of resident atoms */
   n = ipt;
-  if(sid ==0) printf("atoms after atom_copy %d\n", n);
+  if(sid ==0) printf("atoms after atom_move %d\n", n);
 }
 
 /*----------------------------------------------------------------------
