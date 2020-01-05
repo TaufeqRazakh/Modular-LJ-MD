@@ -19,8 +19,8 @@ int main(int argc, char **argv) {
   init_params();
   set_topology(); 
   init_conf();
-  atom_copy();
-  compute_accel(); /* Computes initial accelerations */ 
+  //atom_copy();
+  //compute_accel(); /* Computes initial accelerations */ 
 
   cpu1 = MPI_Wtime();
   for (stepCount=1; stepCount<=StepLimit; stepCount++) {
@@ -132,12 +132,12 @@ rv are initialized with a random velocity corresponding to Temperature.
       for (nX=0; nX<InitUcell[0]; nX++) {
         c[0] = nX*gap[0];
         for (j=0; j<4; j++) {
-	  /* if(sid ==0) printf("atom coordinates -"); */
+	  if(sid ==0) printf("atom coordinates -");
           for (a=0; a<3; a++){
             r[n][a] = c[a] + gap[a]*origAtom[j][a];
-	    /* if(sid == 0) printf(" %f", r[n][a]); */
+	    if(sid == 0) printf(" %f", r[n][a]);
 	  }
-	  /* if(sid ==0) printf("\n"); */
+	  if(sid ==0) printf("\n");
           ++n;
         }
       }
@@ -217,7 +217,10 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
         ku = 2*kd+kdd; /* Neighbor ID */
         /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
            according to bit-condition function, bbd */
-        if (bbd(r[i],ku)) lsb[ku][++(lsb[ku][0])] = i;
+        if (bbd(r[i],ku)) {
+	  lsb[ku][++(lsb[ku][0])] = i;
+	  if(sid == 0) printf("Tested positive for copy %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	}
 	//else
 	  //if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
       }
@@ -260,12 +263,12 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
 
       /* Message buffering */
       for (i=1; i<=nsd; i++) {
-	/* if(sid == 0) printf("copy -"); */
+	if(sid == 0) printf("copy -");
         for (a=0; a<3; a++) /* Shift the coordinate origin */{
           dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a];
-	  /* if(sid == 0) printf(" %f",  dbuf[3*(i-1)+a]); */
+	  if(sid == 0) printf(" %f", r[lsb[ku][i]][a]);
 	}
-	/* if(sid == 0) printf("\n"); */
+	if(sid == 0) printf("\n");
       }
 
       /* Even node: send & recv */
@@ -487,13 +490,20 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       /* Register a to-be-copied atom in mvque[kul|kuh][] */      
       if (r[i][0] > MOVED_OUT) { /* Don't scan moved-out atoms */
         /* Move to the lower direction */
-        if (bmv(r[i],kul)) mvque[kul][++(mvque[kul][0])] = i;
+        if (bmv(r[i],kul)) {
+	  mvque[kul][++(mvque[kul][0])] = i;
+	  if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	}
         /* Move to the higher direction */
-        else if (bmv(r[i],kuh)) mvque[kuh][++(mvque[kuh][0])] = i;
+        else if (bmv(r[i],kuh)) {
+	  mvque[kuh][++(mvque[kuh][0])] = i;
+	  if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	}
       }
     }
 
     if(sid ==0) printf("atoms identified for move to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]);
+
     /* Message passing with neighbor nodes----------------------------*/
 
     com1 = MPI_Wtime();
@@ -526,18 +536,25 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       /* Now nrc is the # of atoms to be received */
 
       /* Send & receive information on boundary atoms-----------------*/
-
-      /* Message buffering */
-      for (i=1; i<=nsd; i++)
+      if(sid ==0) printf("their indices are \n");
+      for (i=1; i<=nsd; i++) {
+	if(sid == 0) printf("%d ",mvque[ku][i]);	
+      }
+      if(sid == 0) printf("\n");
+      
+      /* Message buffering */     
+      for (i=1; i<=nsd; i++){
+	if(sid == 0) printf(" move - ");
         for (a=0; a<3; a++) {
           /* Shift the coordinate origin */
           dbuf[6*(i-1)  +a] = r [mvque[ku][i]][a]-sv[ku][a];
-	  if(sid == 0) printf(" %f",  dbuf[6*(i-1)  +a]); 
+	  if(sid == 0) printf(" %f",   r [mvque[ku][i]][a]); 
           dbuf[6*(i-1)+3+a] = rv[mvque[ku][i]][a];
           r[mvque[ku][i]][0] = MOVED_OUT; /* Mark the moved-out atom */	 
         }
-	if(sid ==0) printf("\n");
-
+	if(sid == 0) printf("\n");
+      }      
+      
       /* Even node: send & recv, if not empty */
       if (myparity[kd] == 0) {
         MPI_Send(dbuf,6*nsd,MPI_DOUBLE,inode,120,MPI_COMM_WORLD);

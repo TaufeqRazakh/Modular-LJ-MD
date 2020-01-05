@@ -100,7 +100,7 @@ public:
 	    atom.y = c[1] + gap[1]*origAtom[j][1];
 
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
-	    // if(pid == 0) cout << "atom coordinates - " << atom.x << " " << atom.y << " " << atom.z << endl;
+	    if(pid == 0) cout << "atom coordinates - " << atom.x << " " << atom.y << " " << atom.z << endl;
 
 	    atoms.push_back(atom);	    
 	  }
@@ -208,7 +208,10 @@ public:
 	  /* Add an atom to the boundary-atom list, LSB, for neighbor ku 
 	     according to bit-condition function, bbd */
 	  i = distance(atoms.begin(), it_atom);
-	  if (bbd(*it_atom,ku)) lsb[ku].push_back(i);	 
+	  if (bbd(*it_atom,ku)) {
+	    lsb[ku].push_back(i);
+	    if(pid == 0) cout << "Tested positive for copy " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
+	  }
 	}       
       }
       if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
@@ -256,11 +259,11 @@ public:
 	for (auto it_index = lsb[ku].begin(); it_index != lsb[ku].end(); ++it_index) {
 	  sendBuf.push_back(atoms[*it_index].type);
 	  sendBuf.push_back(atoms[*it_index].x - sv[ku][0]);
-	  // if(pid == 0) cout << "copy - " << atoms[*it_index].x - sv[ku][0] << " ";
+	  if(pid == 0) cout << "copy - " << atoms[*it_index].x<< " ";
 	  sendBuf.push_back(atoms[*it_index].y - sv[ku][1]);
-	  // if(pid ==0) cout << atoms[*it_index].y - sv[ku][1] << " ";
+	  if(pid ==0) cout << atoms[*it_index].y<< " ";
 	  sendBuf.push_back(atoms[*it_index].z - sv[ku][2]);
-	  // if(pid ==0) cout << atoms[*it_index].z - sv[ku][2] << " " << endl;
+	  if(pid ==0) cout << atoms[*it_index].z << " " << endl;
 	}		
 	// resize the receive buffer for nrc
 	recvBuf.resize(4*nrc);
@@ -338,9 +341,14 @@ public:
       /* Move to the lower direction */
       i = distance(atoms.begin(), it_atom);
       if(it_atom->x > MOVED_OUT) {
-	if (bmv(*it_atom,kul)) mvque[kul].push_back(i);
+	if (bmv(*it_atom,kul)) {
+	  mvque[kul].push_back(i);
+	  if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
+	}
         /* Move to the higher direction */
-	else if (bmv(*it_atom,kuh)) mvque[kuh].push_back(i);
+	else if (bmv(*it_atom,kuh)) {
+	  mvque[kuh].push_back(i);
+	  if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;}
       }      
     }
     
@@ -404,9 +412,9 @@ public:
 	sendBuf.push_back(atoms[*it_index].vy);
 	sendBuf.push_back(atoms[*it_index].vz);
 
-	if(pid == 0) cout << "move - " << atoms[*it_index].x - sv[ku][0] << " ";
-	if(pid ==0) cout << atoms[*it_index].y - sv[ku][1] << " ";
-	if(pid ==0) cout << atoms[*it_index].z - sv[ku][2] << " " << endl;
+	if(pid == 0) cout << "move - " << atoms[*it_index].x << " ";
+	if(pid ==0) cout << atoms[*it_index].y << " ";
+	if(pid ==0) cout << atoms[*it_index].z << " " << endl;
 	//atoms[*it_index].isResident = false;
 	// Mark the atom as moved out
 	atoms[*it_index].x = MOVED_OUT;	
@@ -602,8 +610,8 @@ int main(int argc, char **argv) {
 
   SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
-  subsystem.AtomCopy();
-  ComputeAccel(subsystem);
+  //subsystem.AtomCopy();
+  //ComputeAccel(subsystem);
 
   cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {

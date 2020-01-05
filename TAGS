@@ -1,91 +1,41 @@
 
-pmd.cpp,632
-const double ARmass 14,443
-const double ARsigma 15,486
-const double AReps 16,534
-const double CellDim 17,580
-const double RCUT 19,629
-int NPartPerCell 20,682
-class Atom{Atom25,785
-  Atom(Atom::Atom42,1254
-class Cell 49,1379
-  Cell(Cell::Cell65,1982
-  void InitNeighborNode(Cell::InitNeighborNode124,3768
-  void HalfKick(Cell::HalfKick159,4721
-  void AtomCopy(Cell::AtomCopy168,5005
-  int bbd(Cell::bbd259,7783
-double interact(286,8432
-double interact(314,9074
-int main(319,9251
-void single_step(369,10757
-void compute_accel(385,11408
-void eval_props(497,15020
-void atom_move(524,15881
-int bmv(668,20706
+pmd.cpp,1091
+#define D2P31M 16,510
+#define DMUL 17,538
+const double RCUT 19,560
+const double MOVED_OUT 20,613
+class Atom 25,727
+  Atom(Atom::Atom42,1197
+class SubSystem 49,1325
+  SubSystem(SubSystem::SubSystem67,2117
+  SubSystem(int sid, array<int, 3> vproc, array<int, 3> InitUcell, double InitTemp, double Density): pid(0), n(0), nglob(0), comt(0.0), al{}, vid{}, myparity{}, nn{}, sv{}, vSum{}, gvSum{}, atoms{}, kinEnergy(0.0), potEnergy(0.0), totEnergy(0.0), temperature(SubSystem::temperature67,2117
+  void InitNeighborNode(SubSystem::InitNeighborNode139,4366
+  void Update(SubSystem::Update176,5381
+  void Kick(SubSystem::Kick185,5625
+  void AtomCopy(SubSystem::AtomCopy194,5884
+  void AtomMove(SubSystem::AtomMove318,10073
+  int bbd(SubSystem::bbd476,15260
+  int bmv(SubSystem::bmv501,15921
+    static double Dmod(SubSystem::Dmod524,16382
+  static double RandR(SubSystem::RandR529,16493
+  static void RandVec3(SubSystem::RandVec3533,16599
+  void EvalProps(SubSystem::EvalProps542,16936
+int main(569,17895
+void SingleStep(621,19632
+void ComputeAccel(635,20290
 
-test/pmd.c,291
+test/pmd.c,292
 int main(8,367
 void init_params(38,1253
-void set_topology(78,2455
-void init_conf(113,3608
-void single_step(166,5335
-void half_kick(182,5986
-void atom_copy(192,6380
-void compute_accel(296,9962
-void eval_props(408,13574
-void atom_move(435,14435
-int bbd(579,19258
-int bmv(588,19479
+void set_topology(78,2460
+void init_conf(113,3613
+void single_step(170,5480
+void half_kick(186,6131
+void atom_copy(196,6525
+void compute_accel(316,10813
+void eval_props(429,14517
+void atom_move(456,15381
+int bbd(604,20508
+int bmv(613,20729
 
-test/pmd.h,1356
-#define NMAX 20,849
-#define NEMAX 21,869
-#define NDBUF 22,890
-#define NBMAX 23,911
-#define NCLMAX 24,932
-#define RCUT 25,954
-#define MOVED_OUT 26,971
-#define EMPTY 27,997
-#define D2P31M 29,1062
-#define DMUL 30,1090
-double al[al76,3069
-int n,77,3083
-int n,nb,77,3083
-int n,nb,nglob;77,3083
-double r[r78,3099
-double r[NEMAX][3],rv[rv78,3099
-double r[NEMAX][3],rv[NEMAX][3],ra[ra78,3099
-double dbuf[dbuf79,3144
-double dbuf[NDBUF],dbufr[dbufr79,3144
-int vproc[vproc80,3177
-int sid,81,3212
-int sid,vid[vid81,3212
-int sid,vid[3],nn[nn81,3212
-int sid,vid[3],nn[6],myparity[myparity81,3212
-double sv[sv82,3246
-int lsb[lsb83,3263
-MPI_Status status;84,3282
-double cpu,85,3301
-double cpu,comt;85,3301
-int head[head86,3318
-int head[NCLMAX],lscl[lscl86,3318
-int head[NCLMAX],lscl[NEMAX],lc[lc86,3318
-double rc[rc87,3354
-double kinEnergy,88,3368
-double kinEnergy,potEnergy,88,3368
-double kinEnergy,potEnergy,totEnergy,88,3368
-double kinEnergy,potEnergy,totEnergy,temperature;88,3368
-int stepCount;89,3418
-double DeltaTH;90,3433
-double Uc,91,3477
-double Uc, Duc;91,3477
-int InitUcell[InitUcell97,3701
-double Density;98,3762
-double InitTemp;99,3830
-double DeltaT;100,3895
-int StepLimit;101,3959
-int StepAvg;102,4022
-double SignR(106,4163
-double Dmod(107,4234
-double RandR(112,4318
-void RandVec3(116,4409
+pmd.hpp,0
