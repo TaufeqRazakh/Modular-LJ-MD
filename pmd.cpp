@@ -100,7 +100,7 @@ public:
 	    atom.y = c[1] + gap[1]*origAtom[j][1];
 
 	    atom.z = c[2] + gap[2]*origAtom[j][2];
-	    if(pid == 0) cout << "atom coordinates - " << atom.x << " " << atom.y << " " << atom.z << endl;
+	    // if(pid == 0) cout << "atom coordinates - " << atom.x << " " << atom.y << " " << atom.z << endl;
 
 	    atoms.push_back(atom);	    
 	  }
@@ -176,8 +176,9 @@ public:
   void Update(double DeltaT) {
     for(auto & atom : atoms) {
       atom.x = atom.x + DeltaT*atom.vx;
-      atom.y = atom.y + DeltaT*atom.vz;
-      atom.z = atom.z +DeltaT*atom.vy;
+      atom.y = atom.y + DeltaT*atom.vy;
+      atom.z = atom.z +DeltaT*atom.vz;
+      //if(pid == 0) cout << " : " << atom.vx << " " << atom.vy << atom.vz << endl;
     }
   }
 
@@ -187,6 +188,7 @@ public:
       atom.vx = atom.vx + DeltaT*atom.ax;
       atom.vy = atom.vy + DeltaT*atom.ay;
       atom.vz = atom.vz +DeltaT*atom.az;
+      //if(pid == 0) cout << "kick : " << atom.vx << " " << atom.vy << atom.vz << endl;
     }
   }
 
@@ -210,11 +212,11 @@ public:
 	  i = distance(atoms.begin(), it_atom);
 	  if (bbd(*it_atom,ku)) {
 	    lsb[ku].push_back(i);
-	    if(pid == 0) cout << "Tested positive for copy " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
+	    //if(pid == 0) cout << "Tested positive for copy " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
 	  }
 	}       
       }
-      if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
+      //if(pid ==0) cout << "atoms identified for copy to " << (ku -1)<< " & " << ku << " : " << lsb[ku-1].size() << " " << lsb[ku].size() << endl;
       // if(pid == 0)cout << "atoms searched as far as " << i << endl;
       /* Message passing------------------------------------------------*/   
       
@@ -259,11 +261,11 @@ public:
 	for (auto it_index = lsb[ku].begin(); it_index != lsb[ku].end(); ++it_index) {
 	  sendBuf.push_back(atoms[*it_index].type);
 	  sendBuf.push_back(atoms[*it_index].x - sv[ku][0]);
-	  if(pid == 0) cout << "copy - " << atoms[*it_index].x<< " ";
+	  // if(pid == 0) cout << "copy - " << atoms[*it_index].x<< " ";
 	  sendBuf.push_back(atoms[*it_index].y - sv[ku][1]);
-	  if(pid ==0) cout << atoms[*it_index].y<< " ";
+	  // if(pid ==0) cout << atoms[*it_index].y<< " ";
 	  sendBuf.push_back(atoms[*it_index].z - sv[ku][2]);
-	  if(pid ==0) cout << atoms[*it_index].z << " " << endl;
+	  // if(pid ==0) cout << atoms[*it_index].z << " " << endl;
 	}		
 	// resize the receive buffer for nrc
 	recvBuf.resize(4*nrc);
@@ -343,23 +345,23 @@ public:
       if(it_atom->x > MOVED_OUT) {
 	if (bmv(*it_atom,kul)) {
 	  mvque[kul].push_back(i);
-	  if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
+	  // if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;
 	}
         /* Move to the higher direction */
 	else if (bmv(*it_atom,kuh)) {
 	  mvque[kuh].push_back(i);
-	  if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;}
+	  // if(pid == 0) cout << "Tested positive for move " << it_atom->x << " " << it_atom->z << " " << it_atom->y << endl;}
       }      
     }
     
-    if(pid ==0) {cout << "atoms identified for move to " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
-    cout << "their indices are \n";
-    for(auto & val : mvque[kul])
-      cout << val << " ";
-    cout << "\n";
-    for(auto & val : mvque[kuh])
-      cout << val << " ";
-    cout << "\n";
+    // if(pid ==0) {cout << "atoms identified for move to " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
+    // cout << "their indices are \n";
+    // for(auto & val : mvque[kul])
+      // cout << val << " ";
+    // cout << "\n";
+    // for(auto & val : mvque[kuh])
+      // cout << val << " ";
+    // cout << "\n";
     }
     
     /* Message passing------------------------------------------------*/   
@@ -412,9 +414,9 @@ public:
 	sendBuf.push_back(atoms[*it_index].vy);
 	sendBuf.push_back(atoms[*it_index].vz);
 
-	if(pid == 0) cout << "move - " << atoms[*it_index].x << " ";
-	if(pid ==0) cout << atoms[*it_index].y << " ";
-	if(pid ==0) cout << atoms[*it_index].z << " " << endl;
+	// if(pid == 0) cout << "move - " << atoms[*it_index].x << " ";
+	// if(pid ==0) cout << atoms[*it_index].y << " ";
+	// if(pid ==0) cout << atoms[*it_index].z << " " << endl;
 	//atoms[*it_index].isResident = false;
 	// Mark the atom as moved out
 	atoms[*it_index].x = MOVED_OUT;	
@@ -472,11 +474,11 @@ public:
 
   /* Compress resident arrays including new immigrants */
 
-  if(pid == 0) cout << "atoms before AtomMove = " << n << endl;
+  // if(pid == 0) cout << "atoms before AtomMove = " << n << endl;
   atoms.erase(remove_if(atoms.begin(), atoms.end(),
 			[](Atom atom) { return atom.x <= MOVED_OUT; }), atoms.end());
   n = atoms.size();
-  if(pid == 0) cout << "atoms after AtomMove = " << n << endl;
+  // if(pid == 0) cout << "atoms after AtomMove = " << n << endl;
   
   }
   
@@ -569,7 +571,7 @@ public:
     temperature = kinEnergy*2.0/3.0;
 
     /* Print the computed properties */
-    if (pid == 0) cout << stepCount*DeltaT << " " << lke << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;
+    if (pid == 0) cout << stepCount*DeltaT << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;
   }
 };
 
@@ -693,7 +695,7 @@ void ComputeAccel(SubSystem &subsystem) {
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
+  // cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
     mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
@@ -793,6 +795,6 @@ void ComputeAccel(SubSystem &subsystem) {
       } /* Endfor central cell, c */
 
   /* Global potential energy */
-  if(subsystem.pid == 0) cout << "local potential energy " << lpe << endl;
+  // if(subsystem.pid == 0) cout << "local potential energy " << lpe << endl;
   MPI_Allreduce(&lpe,&subsystem.potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }

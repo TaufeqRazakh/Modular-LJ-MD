@@ -132,12 +132,12 @@ rv are initialized with a random velocity corresponding to Temperature.
       for (nX=0; nX<InitUcell[0]; nX++) {
         c[0] = nX*gap[0];
         for (j=0; j<4; j++) {
-	  if(sid ==0) printf("atom coordinates -");
+	  /* if(sid ==0) printf("atom coordinates -"); */
           for (a=0; a<3; a++){
             r[n][a] = c[a] + gap[a]*origAtom[j][a];
-	    if(sid == 0) printf(" %f", r[n][a]);
+	    /* if(sid == 0) printf(" %f", r[n][a]); */
 	  }
-	  if(sid ==0) printf("\n");
+	  /* if(sid ==0) printf("\n"); */
           ++n;
         }
       }
@@ -188,8 +188,14 @@ void half_kick() {
 Accelerates atomic velocities, rv, by half the time step.
 ----------------------------------------------------------------------*/
   int i,a;
-  for (i=0; i<n; i++)
-    for (a=0; a<3; a++) rv[i][a] = rv[i][a]+DeltaTH*ra[i][a];
+  for (i=0; i<n; i++){
+    /* if(sid == 0) printf("kick : "); */
+    for (a=0; a<3; a++) {      
+    rv[i][a] = rv[i][a]+DeltaTH*ra[i][a];
+    /* if(sid == 0) printf("%f ",rv[i][a]); */
+    }
+    /* if(sid == 0) printf("\n"); */
+  }
 }
 
 /*--------------------------------------------------------------------*/
@@ -219,13 +225,13 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
            according to bit-condition function, bbd */
         if (bbd(r[i],ku)) {
 	  lsb[ku][++(lsb[ku][0])] = i;
-	  if(sid == 0) printf("Tested positive for copy %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	  /* if(sid == 0) printf("Tested positive for copy %f %f %f\n", r[i][0], r[i][1], r[i][2]); */
 	}
 	//else
 	  //if(sid ==0) printf("left out : %f %f %f\n", r[i][0], r[i][1],r[i][2]);
       }
     }
-    if(sid == 0) printf("atoms identified for copy to %d & %d : %d %d\n", (ku-1), ku, lsb[ku-1][0], lsb[ku][0]);
+    /* if(sid == 0) printf("atoms identified for copy to %d & %d : %d %d\n", (ku-1), ku, lsb[ku-1][0], lsb[ku][0]); */
     //if(sid == 0) printf("atoms searched as far as %d\n", i);
 
     /* Message passing------------------------------------------------*/
@@ -263,12 +269,12 @@ boundary-atom list, LSB, then sends & receives boundary atoms.
 
       /* Message buffering */
       for (i=1; i<=nsd; i++) {
-	if(sid == 0) printf("copy -");
+	/* if(sid == 0) printf("copy -"); */
         for (a=0; a<3; a++) /* Shift the coordinate origin */{
           dbuf[3*(i-1)+a] = r[lsb[ku][i]][a]-sv[ku][a];
-	  if(sid == 0) printf(" %f", r[lsb[ku][i]][a]);
+	  /* if(sid == 0) printf(" %f", r[lsb[ku][i]][a]); */
 	}
-	if(sid == 0) printf("\n");
+	/* if(sid == 0) printf("\n"); */
       }
 
       /* Even node: send & recv */
@@ -340,7 +346,7 @@ the residents.
   for (c=0; c<lcxyz2; c++) head[c] = EMPTY;
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  printf("atoms in subsystem = %d\n", (n+nb));
+  /* printf("atoms in subsystem = %d\n", (n+nb)); */
   for (i=0; i<n+nb; i++) {
     for (a=0; a<3; a++) mc[a] = (r[i][a]+rc[a])/rc[a];
 
@@ -424,7 +430,7 @@ the residents.
   } /* Endfor central cell, c */
 
   /* Global potential energy */
-  printf("local potential energy %f\n", lpe);
+  /* printf("local potential energy %f\n", lpe); */
   MPI_Allreduce(&lpe,&potEnergy,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
 }
 
@@ -451,8 +457,8 @@ Evaluates physical properties: kinetic, potential & total energies.
   temperature = kinEnergy*2.0/3.0;
 
   /* Print the computed properties */
-  if (sid == 0) printf("%9.6f %9.6f %9.6f %9.6f %9.6f\n",
-		       stepCount*DeltaT,lke,temperature,potEnergy,totEnergy);
+  if (sid == 0) printf("%9.6f %9.6f %9.6f %9.6f\n",
+		       stepCount*DeltaT,temperature,potEnergy,totEnergy);
 }
 
 /*--------------------------------------------------------------------*/
@@ -492,17 +498,17 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
         /* Move to the lower direction */
         if (bmv(r[i],kul)) {
 	  mvque[kul][++(mvque[kul][0])] = i;
-	  if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	  /* if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]); */
 	}
         /* Move to the higher direction */
         else if (bmv(r[i],kuh)) {
 	  mvque[kuh][++(mvque[kuh][0])] = i;
-	  if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]);
+	  /* if(sid == 0) printf("Tested positive for move %f %f %f\n", r[i][0], r[i][1], r[i][2]); */
 	}
       }
     }
 
-    if(sid ==0) printf("atoms identified for move to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]);
+    /* if(sid ==0) printf("atoms identified for move to %d & %d : %d %d\n", kul, kuh, mvque[kul][0], mvque[kuh][0]); */
 
     /* Message passing with neighbor nodes----------------------------*/
 
@@ -536,23 +542,23 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       /* Now nrc is the # of atoms to be received */
 
       /* Send & receive information on boundary atoms-----------------*/
-      if(sid ==0) printf("their indices are \n");
+      /* if(sid ==0) printf("their indices are \n"); */
       for (i=1; i<=nsd; i++) {
-	if(sid == 0) printf("%d ",mvque[ku][i]);	
+	/* if(sid == 0) printf("%d ",mvque[ku][i]);	 */
       }
-      if(sid == 0) printf("\n");
+      /* if(sid == 0) printf("\n"); */
       
       /* Message buffering */     
       for (i=1; i<=nsd; i++){
-	if(sid == 0) printf(" move - ");
+	/* if(sid == 0) printf(" move - "); */
         for (a=0; a<3; a++) {
           /* Shift the coordinate origin */
           dbuf[6*(i-1)  +a] = r [mvque[ku][i]][a]-sv[ku][a];
-	  if(sid == 0) printf(" %f",   r [mvque[ku][i]][a]); 
+	  /* if(sid == 0) printf(" %f",   r [mvque[ku][i]][a]);  */
           dbuf[6*(i-1)+3+a] = rv[mvque[ku][i]][a];
           r[mvque[ku][i]][0] = MOVED_OUT; /* Mark the moved-out atom */	 
         }
-	if(sid == 0) printf("\n");
+	/* if(sid == 0) printf("\n"); */
       }      
       
       /* Even node: send & recv, if not empty */
@@ -593,7 +599,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
   /* Main loop over x, y & z directions ends--------------------------*/
 
   /* Compress resident arrays including new immigrants */
-  if(sid ==0) printf("atoms before atom_move %d\n", n);
+  /* if(sid ==0) printf("atoms before atom_move %d\n", n); */
   ipt = 0;
   for (i=0; i<n+newim; i++) {
     if (r[i][0] > MOVED_OUT) {
@@ -607,7 +613,7 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
 
   /* Update the compressed # of resident atoms */
   n = ipt;
-  if(sid ==0) printf("atoms after atom_move %d\n", n);
+  /* if(sid ==0) printf("atoms after atom_move %d\n", n); */
 }
 
 /*----------------------------------------------------------------------
