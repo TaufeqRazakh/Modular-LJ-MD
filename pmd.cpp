@@ -344,7 +344,16 @@ public:
       }      
     }
     
-    if(pid ==0) cout << "atoms identified for move to " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
+    if(pid ==0) {cout << "atoms identified for move to " << kul << " & " << kuh << " : " << mvque[kul].size() << " " << mvque[kuh].size() << endl;
+    cout << "their indices are \n";
+    for(auto & val : mvque[kul])
+      cout << val << " ";
+    cout << "\n";
+    for(auto & val : mvque[kuh])
+      cout << val << " ";
+    cout << "\n";
+    }
+    
     /* Message passing------------------------------------------------*/   
       
     com1=MPI_Wtime(); /* To calculate the communication time */
@@ -395,10 +404,12 @@ public:
 	sendBuf.push_back(atoms[*it_index].vy);
 	sendBuf.push_back(atoms[*it_index].vz);
 
-	
+	if(pid == 0) cout << "move - " << atoms[*it_index].x - sv[ku][0] << " ";
+	if(pid ==0) cout << atoms[*it_index].y - sv[ku][1] << " ";
+	if(pid ==0) cout << atoms[*it_index].z - sv[ku][2] << " " << endl;
 	//atoms[*it_index].isResident = false;
 	// Mark the atom as moved out
-	atoms[*it_index].x = MOVED_OUT;
+	atoms[*it_index].x = MOVED_OUT;	
       }
                
       // resize the receive buffer for nrc

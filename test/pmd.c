@@ -19,8 +19,8 @@ int main(int argc, char **argv) {
   init_params();
   set_topology(); 
   init_conf();
-  //atom_copy();
-  //compute_accel(); /* Computes initial accelerations */ 
+  atom_copy();
+  compute_accel(); /* Computes initial accelerations */ 
 
   cpu1 = MPI_Wtime();
   for (stepCount=1; stepCount<=StepLimit; stepCount++) {
@@ -177,7 +177,7 @@ r & rv are propagated by DeltaT using the velocity-Verlet scheme.
   for (i=0; i<n; i++) /* Update atomic coordinates to r(t+Dt) */
     for (a=0; a<3; a++) r[i][a] = r[i][a] + DeltaT*rv[i][a];
   atom_move();
-  //atom_copy();
+  atom_copy();
   compute_accel(); /* Computes new accelerations, a(t+Dt) */
   half_kick(); /* Second half kick to obtain v(t+Dt) */
 }
@@ -531,10 +531,12 @@ mvque[6][NBMAX]: mvque[ku][0] is the # of to-be-moved atoms to neighbor
       for (i=1; i<=nsd; i++)
         for (a=0; a<3; a++) {
           /* Shift the coordinate origin */
-          dbuf[6*(i-1)  +a] = r [mvque[ku][i]][a]-sv[ku][a]; 
+          dbuf[6*(i-1)  +a] = r [mvque[ku][i]][a]-sv[ku][a];
+	  if(sid == 0) printf(" %f",  dbuf[6*(i-1)  +a]); 
           dbuf[6*(i-1)+3+a] = rv[mvque[ku][i]][a];
-          r[mvque[ku][i]][0] = MOVED_OUT; /* Mark the moved-out atom */
+          r[mvque[ku][i]][0] = MOVED_OUT; /* Mark the moved-out atom */	 
         }
+	if(sid ==0) printf("\n");
 
       /* Even node: send & recv, if not empty */
       if (myparity[kd] == 0) {
