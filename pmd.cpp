@@ -8,6 +8,8 @@ systems using the Message Passing Interface (MPI) standard.
 #include <vector>
 #include <array>
 #include <algorithm>
+#include <string>
+#include <sstream>
 #include <map>
 #include "mpi.h"
 #include "pmd.hpp"
@@ -195,7 +197,6 @@ public:
   // Exchange boundaty-atom co-ordinates among neighbor nodes
   void AtomCopy() {
     int kd,kdd,i,ku,inode,nsd,nrc,a;
-    int nbnew = 0; /* # of "received" boundary atoms */
     double com1 = 0;
     vector<vector<int> > lsb (6);
 
@@ -322,8 +323,7 @@ public:
   // from neighbor nodes
   void AtomMove() {
     vector<vector<int> > mvque (6); 
-    int ku,kd,i,kdd,kul,kuh,inode,ipt,a,nsd,nrc;
-    int newim = 0; /* # of new immigrants */
+    int ku,kd,i,kdd,kul,kuh,inode,a,nsd,nrc;
     double com1 = 0;  
 
     atoms.erase(remove_if(atoms.begin(), atoms.end(), [](Atom atom) {return !atom.isResident;}), atoms.end());
@@ -573,6 +573,30 @@ public:
     /* Print the computed properties */
     if (pid == 0) cout << stepCount*DeltaT << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;
   }
+
+  void WriteXYZ(int step)
+  {
+    MPI_File fh;
+  
+    stringstream entriesXYZBuf; // string buffer to load local XYZ co-ordinates into
+    string entriesXYZ;
+
+    entriesXYZBuf.precision(9);
+    entriesXYZBuf.setf(ios::fixed, ios::floatfield); // Setting floatfield precision
+
+    entriesXYZBuf << step << endl;
+    for (auto & atom : atoms) 
+      entriesXYZBuf << atom.x  << " " << atom.y  << " " << atom.z  << endl;
+
+    entriesXYZ = entriesXYZBuf.str();
+    
+    MPI_File_open(MPI_COMM_WORLD, "frame.xyz", MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
+
+    MPI_File_write(fh, entriesXYZ.c_str(), entriesXYZ.size(), MPI_CHAR, MPI_STATUS_IGNORE);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_File_close(&fh);
+  }
 };
 
 /*--------------------------------------------------------------------*/
@@ -619,6 +643,7 @@ int main(int argc, char **argv) {
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
     SingleStep(subsystem, DeltaT);    
     if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
+    subsystem.WriteXYZ(stepCount);
   }
   cpu = MPI_Wtime() - cpu1;
   if (sid == 0) cout << "CPU & COMT = " << cpu << " " << subsystem.comt << endl;
@@ -648,7 +673,7 @@ void ComputeAccel(SubSystem &subsystem) {
     resident & copied) system, computes the acceleration, ra[0:n-1][], for 
     the residents.
     ----------------------------------------------------------------------*/
-  int i,j,a,lc2[3],lcyz2,lcxyz2,mc[3],c,mc1[3],c1;
+  int i,j,a,lc2[3],lcyz2,mc[3],c,mc1[3],c1;
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
 
@@ -689,9 +714,8 @@ void ComputeAccel(SubSystem &subsystem) {
 
   for (a=0; a<3; a++) lc2[a] = lc[a]+2;
   lcyz2 = lc2[1]*lc2[2];
-  lcxyz2 = lc2[0]*lcyz2;
 
-  /* Reset the headers, head */
+    /* Reset the headers, head */
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
