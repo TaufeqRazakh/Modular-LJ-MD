@@ -593,7 +593,7 @@ public:
     int c = 0;
     for (auto & atom : atoms) {
       if(atom.isResident){
-	entriesXYZBuf << pid << " " << ++c << " " << atom.x  << " " << atom.y  << " " << atom.z << endl;
+	entriesXYZBuf << ++c << " " << atom.x  << " " << atom.y  << " " << atom.z << endl;
       }
     }
     
