@@ -478,6 +478,7 @@ public:
   atoms.erase(remove_if(atoms.begin(), atoms.end(),
 			[](Atom atom) { return atom.x <= MOVED_OUT; }), atoms.end());
   n = atoms.size();
+  MPI_Allreduce(&n, &nglob, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
   // if(pid == 0) cout << "atoms after AtomMove = " << n << endl;
   
   }
@@ -574,25 +575,38 @@ public:
     if (pid == 0) cout << stepCount*DeltaT << " " << temperature << " " << potEnergy << " " << totEnergy <<endl;
   }
 
-  void WriteXYZ(int step)
-  {
+  void WriteXYZ(int step) {    
     MPI_File fh;
   
     stringstream entriesXYZBuf; // string buffer to load local XYZ co-ordinates into
     string entriesXYZ;
-
+    string header;
+    int entrySize, offset;
+    
+    string filename = "frame" + to_string(step) + ".xyz";
+    
     entriesXYZBuf.precision(9);
     entriesXYZBuf.setf(ios::fixed, ios::floatfield); // Setting floatfield precision
 
-    entriesXYZBuf << step << endl;
-    for (auto & atom : atoms) 
-      entriesXYZBuf << atom.x  << " " << atom.y  << " " << atom.z  << endl;
+    header = to_string(nglob) + "\n" + "\n";     
 
-    entriesXYZ = entriesXYZBuf.str();
+    int c = 0;
+    for (auto & atom : atoms) {
+      if(atom.isResident){
+	entriesXYZBuf << pid << " " << ++c << " " << atom.x  << " " << atom.y  << " " << atom.z << endl;
+      }
+    }
     
-    MPI_File_open(MPI_COMM_WORLD, "frame.xyz", MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
-
-    MPI_File_write(fh, entriesXYZ.c_str(), entriesXYZ.size(), MPI_CHAR, MPI_STATUS_IGNORE);
+    entriesXYZ = entriesXYZBuf.str();
+    entrySize = entriesXYZ.size();
+    
+    MPI_File_open(MPI_COMM_WORLD, filename.c_str(), MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
+    MPI_File_set_view(fh, sizeof(header), MPI_CHAR, MPI_CHAR, header.c_str(), MPI_INFO_NULL);
+    if(pid == 0) {
+      MPI_File_write(fh, header.c_str(), sizeof(header), MPI_CHAR, MPI_STATUS_IGNORE);
+    }
+    MPI_Scan(&entrySize, &offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_File_write_at_all(fh, offset, entriesXYZ.c_str(), entriesXYZ.size(), MPI_CHAR, MPI_STATUS_IGNORE);
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_File_close(&fh);
@@ -636,14 +650,14 @@ int main(int argc, char **argv) {
 
   SubSystem subsystem(sid, vproc, InitUcell, InitTemp, Density);
   if(sid == 0) cout << "nglob = " << subsystem.nglob << endl;
-  //subsystem.AtomCopy();
-  //ComputeAccel(subsystem);
+  subsystem.AtomCopy();
+  ComputeAccel(subsystem);
 
   cpu1 = MPI_Wtime();
   for (int stepCount=1; stepCount<=StepLimit; stepCount++) {
-    SingleStep(subsystem, DeltaT);    
-    if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);
+    SingleStep(subsystem, DeltaT);
     subsystem.WriteXYZ(stepCount);
+    if (stepCount%StepAvg == 0) subsystem.EvalProps(stepCount, DeltaT);  
   }
   cpu = MPI_Wtime() - cpu1;
   if (sid == 0) cout << "CPU & COMT = " << cpu << " " << subsystem.comt << endl;
@@ -719,7 +733,7 @@ void ComputeAccel(SubSystem &subsystem) {
   //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  // cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
+  //cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
     mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
     mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
