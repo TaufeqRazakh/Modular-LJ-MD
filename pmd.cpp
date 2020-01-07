@@ -588,24 +588,30 @@ public:
     entriesXYZBuf.precision(9);
     entriesXYZBuf.setf(ios::fixed, ios::floatfield); // Setting floatfield precision
 
-    header = to_string(nglob) + "\n" + "\n";     
+    header = to_string(nglob) + "\n";     
 
     int c = 0;
     for (auto & atom : atoms) {
       if(atom.isResident){
-	entriesXYZBuf << ++c << " " << atom.x  << " " << atom.y  << " " << atom.z << endl;
+	entriesXYZBuf << "\n" << ++c << " " << atom.x  << " " << atom.y  << " " << atom.z;
+	//if(pid == 0 && step == 1)
+	//  cout << c << " " << atom.x  << " " << atom.y  << " " << atom.z << endl;
       }
     }
     
     entriesXYZ = entriesXYZBuf.str();
     entrySize = entriesXYZ.size();
+    if(pid == 0) entrySize += header.size();
     
     MPI_File_open(MPI_COMM_WORLD, filename.c_str(), MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
-    MPI_File_set_view(fh, sizeof(header), MPI_CHAR, MPI_CHAR, header.c_str(), MPI_INFO_NULL);
+    //MPI_File_set_view(fh, sizeof(header), MPI_CHAR, MPI_CHAR, "", MPI_INFO_NULL);
     if(pid == 0) {
       MPI_File_write(fh, header.c_str(), sizeof(header), MPI_CHAR, MPI_STATUS_IGNORE);
     }
     MPI_Scan(&entrySize, &offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+    if(step == 1) cout << "pid :" << pid << " entrysize:" << entrySize << " offset :" << offset << endl;
+    offset -= entriesXYZ.size();
     MPI_File_write_at_all(fh, offset, entriesXYZ.c_str(), entriesXYZ.size(), MPI_CHAR, MPI_STATUS_IGNORE);
 
     MPI_Barrier(MPI_COMM_WORLD);
