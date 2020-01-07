@@ -610,7 +610,7 @@ public:
     }
     MPI_Scan(&entrySize, &offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-    if(step == 1) cout << "pid :" << pid << " entrysize:" << entrySize << " offset :" << offset << endl;
+    //if(step == 1) cout << "pid :" << pid << " entrysize:" << entrySize << " offset :" << offset << endl;
     offset -= entriesXYZ.size();
     MPI_File_write_at_all(fh, offset, entriesXYZ.c_str(), entriesXYZ.size(), MPI_CHAR, MPI_STATUS_IGNORE);
 
@@ -693,7 +693,7 @@ void ComputeAccel(SubSystem &subsystem) {
     resident & copied) system, computes the acceleration, ra[0:n-1][], for 
     the residents.
     ----------------------------------------------------------------------*/
-  int i,j,a,lc2[3],lcyz2,mc[3],c,mc1[3],c1;
+  int i,j,a,lc2[3],lcyz2,lcxyz2,mc[3],c,mc1[3],c1;
   int bintra;
   double dr[3],rr,ri2,ri6,r1,rrCut,fcVal,f,vVal,lpe;
 
@@ -702,8 +702,8 @@ void ComputeAccel(SubSystem &subsystem) {
   array<int, 3> lc{};
   array<double, 3> rc{};
 
-  //vector<int> head;
-  map<int, int> head;
+  vector<int> head;
+  //map<int, int> head;
   vector<int> lscl (subsystem.atoms.size());
   int EMPTY = -1;
   
@@ -712,10 +712,10 @@ void ComputeAccel(SubSystem &subsystem) {
     lc[a] = subsystem.al[a]/RCUT; 
     rc[a] = subsystem.al[a]/lc[a];
   }
-  // if (subsystem.pid == 0) {
-  //   cout << "lc = " << lc[0] << " " << lc[1] << " " << lc[2] << endl;
-  //   cout << "rc = " << rc[0] << " " << rc[1] << " " << rc[2] << endl;
-  // }
+   // if (subsystem.pid == 0) {
+   //   cout << "lc = " << lc[0] << " " << lc[1] << " " << lc[2] << endl;
+   //   cout << "rc = " << rc[0] << " " << rc[1] << " " << rc[2] << endl;
+   // }
   
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
@@ -734,33 +734,40 @@ void ComputeAccel(SubSystem &subsystem) {
 
   for (a=0; a<3; a++) lc2[a] = lc[a]+2;
   lcyz2 = lc2[1]*lc2[2];
+  lcxyz2 = lc2[0]*lcyz2;
 
     /* Reset the headers, head */
-  //for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
+  for (c=0; c<lcxyz2; c++) head.push_back(EMPTY);
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  //cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
+  // if(subsystem.pid == 0)cout << "atoms in subsystem  = "  << subsystem.atoms.size() << endl;
   for (auto it_atom = subsystem.atoms.begin(); it_atom != subsystem.atoms.end(); ++it_atom) {
-    mc[0] = (int)(it_atom->x + rc[0]) / rc[0];
-    mc[1] = (int)(it_atom->y + rc[1]) / rc[1];
-    mc[2] = (int)(it_atom->z + rc[2]) / rc[2];
+    mc[0] = (it_atom->x + rc[0]) / rc[0];
+    mc[1] = (it_atom->y + rc[1]) / rc[1];
+    mc[2] = (it_atom->z + rc[2]) / rc[2];
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
+    
+    cout.precision(6);
+    cout.setf(ios::fixed, ios::floatfield);
+    //if(subsystem.pid == 0) cout << "coordinates " << it_atom->x << " "  << it_atom->y << " "  << it_atom->z << endl;
 
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
     //if(subsystem.pid == 0) cout << "before head size: " << head.size() << " c: "<< c << " i: " << i <<  " head[c]: " << head[c] << endl;
-    auto search = head.find(c);
-    if(search != head.end())
-      lscl[distance(subsystem.atoms.begin(), it_atom)] = search->second;
-    else
-      lscl[distance(subsystem.atoms.begin(), it_atom)] = EMPTY;
+    // auto search = head.find(c);
+    // if(search != head.end())
+    //   lscl[distance(subsystem.atoms.begin(), it_atom)] = search->second;
+    // else
+    //   lscl[distance(subsystem.atoms.begin(), it_atom)] = EMPTY;
+    lscl[distance(subsystem.atoms.begin(), it_atom)] = head[c];
     //if(subsystem.pid == 0) cout <<"after head[c]: " << head[c] << endl;
     //continue;
     /* The last one goes to the header */
-    if(search != head.end())
-      head.erase(search);
-    head.insert(head.begin(), pair<int, int>(c,distance(subsystem.atoms.begin(), it_atom)));
-    //if(subsystem.pid == 0) cout << "You have reached the loop end" << endl;
+    head[c] = distance(subsystem.atoms.begin(), it_atom);
+    // if(search != head.end())
+    //   head.erase(search);
+    // head.insert(head.begin(), pair<int, int>(c,distance(subsystem.atoms.begin(), it_atom)));
+    //if(subsystem.pid == 0) cout << "mc " << mc [0] << " " << mc [1] << " " << mc [2] << " c " << c << " lscl " << lscl[distance(subsystem.atoms.begin(), it_atom)] << " head " << head[c] << endl;
   } /* Endfor atom i */
 
   /* Calculate pair interaction---------------------------------------*/
@@ -773,7 +780,8 @@ void ComputeAccel(SubSystem &subsystem) {
 	/* Calculate a scalar cell index */
 	c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
 	/* Skip this cell if empty */
-	if (head.find(c) == head.end()) continue;
+	//if (head.find(c) == head.end()) continue;
+	if(head[c] == EMPTY) continue;
 
 	/* Scan the neighbor cells (including itself) of cell c */
 	for (mc1[0]=mc[0]-1; mc1[0]<=mc[0]+1; (mc1[0])++)
@@ -782,8 +790,9 @@ void ComputeAccel(SubSystem &subsystem) {
 
 	      /* Calculate the scalar cell index of the neighbor cell */
 	      c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
+	      //if(subsystem.pid == 0) cout << "c1 = " << c1 <<endl;
 	      /* Skip this neighbor cell if empty */
-	      if (head.find(c1) == head.end()) continue;
+	      if(head[c1] == EMPTY) continue;
 
 	      /* Scan atom i in cell c */
 	      i = head[c];
@@ -792,7 +801,7 @@ void ComputeAccel(SubSystem &subsystem) {
 		/* Scan atom j in cell c1 */
 		j = head[c1];
 		while (j != EMPTY) {
-
+		  //if(subsystem.pid == 0)cout << "i & j :" << i << " " << j << endl;
 		  /* No calculation with itself */
 		  if (j != i) {
 		    /* Logical flag: intra(true)- or inter(false)-pair atom */
@@ -812,19 +821,23 @@ void ComputeAccel(SubSystem &subsystem) {
 		      ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1 = sqrt(rr);
 		      fcVal = 48.0*ri2*ri6*(ri6-0.5) + Duc/r1;
 		      vVal = 4.0*ri6*(ri6-1.0) - Uc - Duc*(r1-RCUT);
+		      //if(subsystem.pid == 0) cout << " atom " << j << " ri2 :" << ri2 << " ri6 " << ri6 << " r1 " << r1 << " fcVal " << fcVal << " vVal " << vVal << " bintra " << bintra << endl;
 		      if (bintra) lpe += vVal; else lpe += 0.5*vVal;
-
+		      
 		      f = fcVal*dr[0];
 		      subsystem.atoms[i].ax += f;
 		      if(bintra) subsystem.atoms[j].ax -= f;
+		      //if(subsystem.pid == 0) cout << "accleration " << subsystem.atoms[j].ax << " factor " << " : " << f << endl;
 	      
 		      f = fcVal*dr[1];
 		      subsystem.atoms[i].ay += f;
 		      if(bintra) subsystem.atoms[j].ay -= f;
+		      //if(subsystem.pid == 0) cout << "accleration " << subsystem.atoms[j].ay << " factor " << " : " << f << endl;
 	      
-		      f = fcVal*dr[0];
+		      f = fcVal*dr[2];
 		      subsystem.atoms[i].az += f;
-		      if(bintra) subsystem.atoms[j].az -= f;	                   
+		      if(bintra) subsystem.atoms[j].az -= f;
+		      //if(subsystem.pid == 0) cout << "accleration " << subsystem.atoms[j].az << " factor " << " : " << f << endl;
 		    }
 		  } /* Endif not self */
           

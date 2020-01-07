@@ -19,12 +19,12 @@ int main(int argc, char **argv) {
   init_params();
   set_topology(); 
   init_conf();
-  //atom_copy();
-  //compute_accel(); /* Computes initial accelerations */ 
+  atom_copy();
+  compute_accel(); /* Computes initial accelerations */ 
 
   cpu1 = MPI_Wtime();
   for (stepCount=1; stepCount<=StepLimit; stepCount++) {
-    single_step(); 
+    single_step();
     if (stepCount%StepAvg == 0) eval_props();
   }
   cpu = MPI_Wtime() - cpu1;
@@ -56,17 +56,17 @@ Initializes parameters.
   /* Compute basic parameters */
   DeltaTH = 0.5*DeltaT;
   for (a=0; a<3; a++) al[a] = InitUcell[a]/pow(Density/4.0,1.0/3.0);
-  if (sid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
+  //if (sid == 0) printf("al = %e %e %e\n",al[0],al[1],al[2]);
 
   /* Compute the # of cells for linked cell lists */
   for (a=0; a<3; a++) {
     lc[a] = al[a]/RCUT; 
     rc[a] = al[a]/lc[a];
   }
-  if (sid == 0) {
-    printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]);
-    printf("rc = %e %e %e\n",rc[0],rc[1],rc[2]);
-  }
+  /* if (sid == 0) { */
+  /*   printf("lc = %d %d %d\n",lc[0],lc[1],lc[2]); */
+  /*   printf("rc = %e %e %e\n",rc[0],rc[1],rc[2]); */
+  /* } */
 
   /* Constants for potential truncation */
   rr = RCUT*RCUT; ri2 = 1.0/rr; ri6 = ri2*ri2*ri2; r1=sqrt(rr);
@@ -346,18 +346,19 @@ the residents.
   for (c=0; c<lcxyz2; c++) head[c] = EMPTY;
 
   /* Scan atoms to construct headers, head, & linked lists, lscl */
-  /* printf("atoms in subsystem = %d\n", (n+nb)); */
+  //if(sid == 0)printf("atoms in subsystem = %d\n", (n+nb));
   for (i=0; i<n+nb; i++) {
     for (a=0; a<3; a++) mc[a] = (r[i][a]+rc[a])/rc[a];
 
     /* Translate the vector cell index, mc, to a scalar cell index */
     c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
-
+    //if(sid ==  0) printf("coordinates %f %f %f\n", r[i][0], r[i][1], r[i][2]);
     /* Link to the previous occupant (or EMPTY if you're the 1st) */
     lscl[i] = head[c];
 
     /* The last one goes to the header */
     head[c] = i;
+    //if(sid == 0) printf("mc: %d %d %d c: %d lscl: %d head %d\n", mc[0], mc[1], mc[2], c, lscl[i], head[c]);
   } /* Endfor atom i */
 
   /* Calculate pair interaction---------------------------------------*/
@@ -370,7 +371,7 @@ the residents.
   for (mc[2]=1; mc[2]<=lc[2]; (mc[2])++) {
 
     /* Calculate a scalar cell index */
-    c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];
+    c = mc[0]*lcyz2+mc[1]*lc2[2]+mc[2];    
     /* Skip this cell if empty */
     if (head[c] == EMPTY) continue;
 
@@ -381,6 +382,7 @@ the residents.
 
       /* Calculate the scalar cell index of the neighbor cell */
       c1 = mc1[0]*lcyz2+mc1[1]*lc2[2]+mc1[2];
+      //if(sid == 0) printf("c1 = %d\n",c1);
       /* Skip this neighbor cell if empty */
       if (head[c1] == EMPTY) continue;
 
@@ -391,7 +393,7 @@ the residents.
         /* Scan atom j in cell c1 */
         j = head[c1];
         while (j != EMPTY) {
-
+	  //if(sid == 0) printf("i & j :  %d %d\n",i, j);
           /* No calculation with itself */
           if (j != i) {
             /* Logical flag: intra(true)- or inter(false)-pair atom */
@@ -411,10 +413,12 @@ the residents.
               fcVal = 48.0*ri2*ri6*(ri6-0.5) + Duc/r1;
               vVal = 4.0*ri6*(ri6-1.0) - Uc - Duc*(r1-RCUT);
               if (bintra) lpe += vVal; else lpe += 0.5*vVal;
+	      //if(sid == 0) printf("atom %d ri2 : %f ri6 : %f r1 %f fcVal %f vVal %f bintra %d\n",j, ri2, ri6, r1, fcVal, vVal, bintra);
               for (a=0; a<3; a++) {
                 f = fcVal*dr[a];
                 ra[i][a] += f;
                 if (bintra) ra[j][a] -= f;
+		//if(sid == 0) printf("accleration %f factor: %f\n", ra[j][a], f);
               }
             }
           } /* Endif not self */
