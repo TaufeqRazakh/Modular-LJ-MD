@@ -3,11 +3,17 @@ project(Modular-MD)
 
 set(CMAKE_CXX_STANDARD 11)
 
+add_library(pmd STATIC
+        pmd.cpp
+        pmd.hpp
+        )
+
 find_package(MPI REQUIRED)
 
 include_directories(${MPI_INCLUDE_PATH})
 
-add_executable(Modular-MD pmd.cpp)
+add_executable(Modular-MD pmd_notebook.cpp)
+target_link_libraries(Modular-MD pmd)
 
 target_link_libraries(Modular-MD ${MPI_LIBRARIES})
 
